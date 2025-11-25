@@ -1,0 +1,37 @@
+# Security - Keys mounted as volume at runtime
+keys/
+secrets/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.claude/
+
+# Documentation
+*.md
+README.md
+
+# OS files
+.DS_Store
+Thumbs.db
