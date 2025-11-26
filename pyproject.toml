@@ -18,3 +18,35 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 betfinder = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.0",
+    "ruff>=0.14.6",
+]
+
+[tool.ruff]
+# Target Python 3.11+
+target-version = "py311"
+
+# Exclude common directories
+exclude = [
+    ".venv",
+    "__pycache__",
+]
+
+# Only check for critical errors and syntax issues
+lint.select = [
+    "E",  # pycodestyle errors (syntax errors, indentation issues)
+    "F",  # Pyflakes (undefined names, unused imports, etc.)
+]
+
+# Ignore non-critical warnings for barebones setup
+lint.ignore = [
+    "E501",  # line too long - not critical for functionality
+    "E402",  # module level import not at top - sometimes needed for conditional imports
+]
+
+# Per-file ignores for common patterns
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]  # Allow unused imports in __init__.py files (they're re-exports)

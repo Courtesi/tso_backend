@@ -233,7 +233,7 @@ async def create_portal_session(
 		# The Firebase Stripe extension creates customers with metadata['firebaseUID'] = uid
 
 		# Search for the customer by Firebase UID in metadata
-		customers = stripe.Customer.list(limit=1).data
+		# customers = stripe.Customer.list(limit=1).data
 		customer_id = None
 
 		# Try to find customer with matching Firebase UID

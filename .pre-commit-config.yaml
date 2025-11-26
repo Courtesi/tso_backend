@@ -1,0 +1,10 @@
+# Pre-commit hooks configuration
+# Docs: https://pre-commit.com/
+
+repos:
+  # Ruff - Python linter (just error checking)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]  # Auto-fix simple issues like unused imports

@@ -1,7 +1,6 @@
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 import os
-import uvicorn
 import logging
 from app.router import router
 from fastapi import FastAPI
@@ -9,11 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.redis import redis_client
 
-from dotenv import load_dotenv
-import pathlib
-
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import credentials
 
 settings = get_settings()
 

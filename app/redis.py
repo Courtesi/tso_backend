@@ -1,8 +1,7 @@
 import redis.asyncio as redis
 import json
-from typing import Any, Optional, Union
+from typing import Any, Optional
 from functools import wraps
-import asyncio
 import logging
 
 from app.config import get_settings
