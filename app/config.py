@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 	}
 
 	class Config:
-		env_file = "secrets/.env"
+		env_file = ".env"
 		# extra = "ignore"  # Ignore extra fields in .env that aren't defined here
 	
 @lru_cache
