@@ -8,7 +8,7 @@ import redis.asyncio as redis
 logger = logging.getLogger(__name__)
 
 from app.config import get_settings
-from app.dependencies import get_firebase_user_from_token, get_user_with_tier, get_user_with_tier_from_query
+from app.dependencies import get_firebase_user_from_token, get_user_with_tier_from_query, get_user_with_tier_from_either
 from app.redis import redis_client
 
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -122,9 +122,9 @@ async def stream_arbs(request: Request, user: Annotated[dict, Depends(get_user_w
 	)
 		
 @router.get("/data/arbs")
-async def get_arbs(user: Annotated[dict, Depends(get_user_with_tier)]):
+async def get_arbs(user: Annotated[dict, Depends(get_user_with_tier_from_either)]):
 	tier = user.get("tier", "free")
-	# logger.info(f"User tier: {tier}, stripeRole: {user.get('stripeRole')}")
+	logger.info(f"User tier: {tier}, stripeRole: {user.get('stripeRole')}")
 
 	# Choose cache key based on tier
 	if tier == "premium":

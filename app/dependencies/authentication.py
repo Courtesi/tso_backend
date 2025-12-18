@@ -98,3 +98,55 @@ def get_user_with_tier_from_query(user: Annotated[dict, Depends(get_firebase_use
     user["tier"] = tier
 
     return user
+
+
+def get_firebase_user_from_either(
+    bearer_token: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    query_token: Annotated[Optional[str], Query(alias="token")] = None
+):
+    """Uses EITHER bearer token OR query parameter to identify firebase user
+    Args:
+        bearer_token: Bearer token from Authorization header (can be None)
+        query_token: Token from query parameter (can be None)
+    Returns:
+        dict: the firebase user on success
+    Raises:
+        HTTPException 401 if user does not exist or token is invalid
+    """
+    try:
+        # Try bearer token first
+        if bearer_token:
+            user = verify_id_token(bearer_token.credentials)
+            return user
+        # Fall back to query token
+        elif query_token:
+            user = verify_id_token(query_token)
+            return user
+        else:
+            raise ValueError("No token provided")
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not logged in or Invalid credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def get_user_with_tier_from_either(user: Annotated[dict, Depends(get_firebase_user_from_either)]) -> dict:
+    """
+    Dependency that extracts user info and tier from Firebase token (accepts both header and query param).
+
+    Args:
+        user: Verified Firebase user dict from token
+
+    Returns:
+        dict: The user dict with added 'tier' key
+    """
+    # Get tier from stripeRole custom claim
+    stripe_role = user.get("stripeRole")
+    tier = stripe_role if stripe_role else "free"
+
+    # Add tier to user dict for use in endpoint
+    user["tier"] = tier
+
+    return user
