@@ -13,7 +13,8 @@ from firebase_admin import credentials
 
 settings = get_settings()
 
-if settings.ENV == "production":
+# Check if in docker container
+if not os.path.exists("/.dockerenv"):
 	os.makedirs("logs", exist_ok=True)
 
 	# Production: logs to files
@@ -30,13 +31,13 @@ if settings.ENV == "production":
 	access_handler = RotatingFileHandler('logs/access.log', maxBytes=10*1024*1024, backupCount=5)
 	logging.getLogger("uvicorn.access").addHandler(access_handler)
 	logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-else:
-	# Development: logs to console only, hide access logs
-	logging.basicConfig(
-		level=logging.INFO,
-		format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-	)
-	logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+      
+# Development: logs to console only, hide access logs
+logging.basicConfig(
+	level=logging.INFO,
+	format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
