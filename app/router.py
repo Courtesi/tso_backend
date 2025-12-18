@@ -97,8 +97,9 @@ async def stream_arbs(request: Request, user: Annotated[dict, Depends(get_user_w
 					# Send as SSE event
 					yield f"data: {json.dumps(response_data)}\n\n"
 				else:
-					# No message, just send heartbeat to keep connection alive
-					await asyncio.sleep(0.1)
+					# No message, send heartbeat comment to keep connection alive
+					yield ": heartbeat\n\n"
+					await asyncio.sleep(15)
 		except asyncio.CancelledError:
 			# Client disconnected
 			pass
