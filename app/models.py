@@ -69,3 +69,105 @@ class ArbitrageBet(BaseModel):
 				"expires_in_minutes": 15
 			}
 		}
+
+
+# ==================== TERMINAL/LINE MOVEMENT MODELS ====================
+
+class LineDataPoint(BaseModel):
+	"""Single odds data point in time series"""
+	odds: float
+	sportsbook: str
+	timestamp: int  # Unix timestamp
+
+	class Config:
+		json_schema_extra = {
+			"example": {
+				"odds": -110,
+				"sportsbook": "DraftKings",
+				"timestamp": 1704461400
+			}
+		}
+
+
+class OutcomeLine(BaseModel):
+	"""Complete line history for a specific outcome"""
+	outcome_id: str
+	outcome_name: str  # "Lakers ML", "Over 220.5", "Chiefs -3.5"
+	history: list[LineDataPoint]  # Time-ordered
+	current_best_odds: float
+	current_best_sportsbook: str
+
+	class Config:
+		json_schema_extra = {
+			"example": {
+				"outcome_id": "lakers_ml",
+				"outcome_name": "Lakers ML",
+				"history": [
+					{"odds": -110, "sportsbook": "DraftKings", "timestamp": 1704461400},
+					{"odds": -115, "sportsbook": "DraftKings", "timestamp": 1704461410}
+				],
+				"current_best_odds": -110,
+				"current_best_sportsbook": "FanDuel"
+			}
+		}
+
+
+class MarketLines(BaseModel):
+	"""All outcomes for a specific market"""
+	market_type: str  # "MONEY", "SPREAD", "TOTAL"
+	market_display: str  # "Moneyline", "Spread -3.5", "Total 220.5"
+	outcomes: list[OutcomeLine]
+
+	class Config:
+		json_schema_extra = {
+			"example": {
+				"market_type": "MONEY",
+				"market_display": "Moneyline",
+				"outcomes": [
+					{
+						"outcome_id": "lakers_ml",
+						"outcome_name": "Lakers ML",
+						"history": [],
+						"current_best_odds": -110,
+						"current_best_sportsbook": "FanDuel"
+					}
+				]
+			}
+		}
+
+
+class GameTerminalData(BaseModel):
+	"""Complete terminal data for a single game"""
+	event_id: str
+	sport: str
+	league: str
+	home_team: str
+	away_team: str
+	matchup: str
+	start_time: str  # ISO format
+	game_status: str  # "upcoming", "live", "completed"
+	markets: list[MarketLines]
+
+	class Config:
+		json_schema_extra = {
+			"example": {
+				"event_id": "nba_lakers_warriors_20260105_1900",
+				"sport": "basketball",
+				"league": "NBA",
+				"home_team": "Warriors",
+				"away_team": "Lakers",
+				"matchup": "Lakers @ Warriors",
+				"start_time": "2026-01-05T19:00:00Z",
+				"game_status": "upcoming",
+				"markets": []
+			}
+		}
+
+
+class TerminalResponse(BaseModel):
+	"""Response for terminal stream endpoint"""
+	tier: str
+	data: list[GameTerminalData]
+	metadata: dict | None = None
+	cached_at: str | None = None
+	message: str | None = None

@@ -34,6 +34,11 @@ class Settings(BaseSettings):
 		"premium": None
 	}
 
+	TIER_MAX_GAMES: dict = {
+		"free": 10,
+		"premium": None
+	}
+
 	class Config:
 		env_file = ".env"
 		# extra = "ignore"  # Ignore extra fields in .env that aren't defined here

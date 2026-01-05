@@ -10,6 +10,8 @@ logger = logging.getLogger(__name__)
 from app.config import get_settings
 from app.dependencies import get_firebase_user_from_token, get_user_with_tier_from_query, get_user_with_tier_from_either
 from app.redis import redis_client
+from app import terminal_utils
+import time
 
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.exceptions import HTTPException
@@ -158,6 +160,217 @@ async def get_arbs(user: Annotated[dict, Depends(get_user_with_tier_from_either)
 		"metadata": cached_data.get("metadata"),
 		"cached_at": cached_data.get("cached_at")
 	}
+
+
+# ==================== TERMINAL/LINE MOVEMENT ENDPOINTS ====================
+
+@router.get("/data/terminal/stream")
+async def stream_terminal_data(
+	request: Request,
+	user: Annotated[dict, Depends(get_user_with_tier_from_query)],
+	league: Optional[str] = None,
+	game_time: Optional[str] = None
+):
+	"""
+	Stream terminal data (line movements) via SSE.
+
+	Query params:
+	- league: Filter by league (NBA, NFL, etc.)
+	- game_time: Filter by game status (upcoming, live)
+	"""
+	tier = user.get("tier", "free")
+
+	async def event_generator():
+		pubsub_redis = redis.Redis(
+			host=settings.REDIS_HOST,
+			port=settings.REDIS_PORT,
+			db=settings.REDIS_DB,
+			password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+			decode_responses=True
+		)
+
+		try:
+			# For now, we'll poll for data every 10 seconds and send updates
+			# In production, this would subscribe to a pub/sub channel
+			while True:
+				# Check if client disconnected
+				if await request.is_disconnected():
+					break
+
+				try:
+					# Fetch games with lines from Redis
+					games = await terminal_utils.fetch_games_with_lines(
+						redis_client.redis,
+						league=league,
+						game_time=game_time
+					)
+
+					# Apply tier limits
+					max_games = settings.TIER_MAX_GAMES.get(tier)
+					if max_games and len(games) > max_games:
+						games = games[:max_games]
+
+					# Convert Pydantic models to dicts
+					games_data = [game.model_dump() for game in games]
+
+					response_data = {
+						"tier": tier,
+						"data": games_data,
+						"metadata": {
+							"count": len(games_data),
+							"league": league or "all",
+							"game_time": game_time or "all"
+						},
+						"cached_at": datetime.now(timezone.utc).isoformat() + "Z"
+					}
+
+					# Send as SSE event
+					yield f"data: {json.dumps(response_data)}\n\n"
+
+					# Wait before next update
+					await asyncio.sleep(10)
+
+				except Exception as e:
+					logger.error(f"Error fetching terminal data: {e}")
+					yield f"data: {json.dumps({'error': 'Failed to fetch terminal data'})}\n\n"
+					await asyncio.sleep(10)
+
+		except asyncio.CancelledError:
+			# Client disconnected
+			pass
+		except Exception as e:
+			logger.error(f"Error in terminal SSE stream: {e}")
+			yield f"data: {json.dumps({'error': 'Stream error occurred'})}\n\n"
+		finally:
+			# Cleanup
+			await pubsub_redis.close()
+
+	return StreamingResponse(
+		event_generator(),
+		media_type="text/event-stream",
+		headers={
+			"Cache-Control": "no-cache",
+			"Connection": "keep-alive",
+			"X-Accel-Buffering": "no",
+		}
+	)
+
+
+@router.get("/data/terminal")
+async def get_terminal_data(
+	user: Annotated[dict, Depends(get_user_with_tier_from_either)],
+	league: Optional[str] = None,
+	game_time: Optional[str] = None
+):
+	"""
+	Polling fallback for terminal data (same filters as stream).
+	"""
+	tier = user.get("tier", "free")
+
+	try:
+		# Fetch games with lines from Redis
+		games = await terminal_utils.fetch_games_with_lines(
+			redis_client.redis,
+			league=league,
+			game_time=game_time
+		)
+
+		# Apply tier limits
+		max_games = settings.TIER_MAX_GAMES.get(tier)
+		if max_games and len(games) > max_games:
+			games = games[:max_games]
+
+		# Convert Pydantic models to dicts
+		games_data = [game.model_dump() for game in games]
+
+		return {
+			"tier": tier,
+			"data": games_data,
+			"metadata": {
+				"count": len(games_data),
+				"league": league or "all",
+				"game_time": game_time or "all"
+			},
+			"cached_at": datetime.now(timezone.utc).isoformat() + "Z"
+		}
+
+	except Exception as e:
+		logger.error(f"Error fetching terminal data: {e}")
+		return {
+			"tier": tier,
+			"data": [],
+			"metadata": None,
+			"message": f"Error fetching terminal data: {str(e)}"
+		}
+
+
+@router.get("/data/terminal/lines/{event_id}/{market_type}/{outcome_id}")
+async def get_line_history(
+	event_id: str,
+	market_type: str,
+	outcome_id: str,
+	user: Annotated[dict, Depends(get_user_with_tier_from_either)],
+	start_time: Optional[int] = None,
+	end_time: Optional[int] = None
+):
+	"""
+	Get historical line data for a specific outcome.
+
+	Path params:
+	- event_id: Game identifier
+	- market_type: MONEY, SPREAD, or TOTAL
+	- outcome_id: Specific outcome identifier
+
+	Query params:
+	- start_time: Unix timestamp (default: 1 hour ago)
+	- end_time: Unix timestamp (default: now)
+	"""
+	# tier = user.get("tier", "free")
+
+	# Construct Redis key
+	key = f"lines:{event_id}:{market_type}:{outcome_id}"
+
+	# Default time range: last hour
+	now = int(time.time())
+	start = start_time if start_time else now - 3600
+	end = end_time if end_time else now
+
+	try:
+		# Get data from sorted set
+		raw_data = await redis_client.redis.zrangebyscore(
+			key,
+			start,
+			end,
+			withscores=True
+		)
+
+		# Parse JSON members
+		history = []
+		for member, score in raw_data:
+			# Decode if bytes
+			if isinstance(member, bytes):
+				member = member.decode('utf-8')
+
+			try:
+				data_point = json.loads(member)
+				history.append(data_point)
+			except json.JSONDecodeError:
+				continue
+
+		return {
+			"event_id": event_id,
+			"market_type": market_type,
+			"outcome_id": outcome_id,
+			"history": history,
+			"count": len(history)
+		}
+
+	except Exception as e:
+		logger.error(f"Error fetching line history: {e}")
+		raise HTTPException(
+			status_code=500,
+			detail=f"Failed to fetch line history: {str(e)}"
+		)
 
 
 # ==================== USER MANAGEMENT ====================
