@@ -1,6 +1,4 @@
 from contextlib import asynccontextmanager
-from logging.handlers import RotatingFileHandler
-import os
 import logging
 from app.router import router
 from fastapi import FastAPI
@@ -12,32 +10,20 @@ import firebase_admin
 from firebase_admin import credentials
 
 settings = get_settings()
-
-# Check if in docker container
-if not os.path.exists("/.dockerenv"):
-	os.makedirs("logs", exist_ok=True)
-
-	# Production: logs to files
-	logging.basicConfig(
-		level=logging.INFO,
-		format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-		handlers=[
-			logging.StreamHandler(),  # Still show critical errors in console
-			RotatingFileHandler('logs/app.log', maxBytes=10*1024*1024, backupCount=5)
-		]
-	)
-
-	# Access logs to separate file
-	access_handler = RotatingFileHandler('logs/access.log', maxBytes=10*1024*1024, backupCount=5)
-	logging.getLogger("uvicorn.access").addHandler(access_handler)
-	logging.getLogger("uvicorn.access").setLevel(logging.INFO)
       
+# Custom filter to exclude health check logs
+class HealthCheckFilter(logging.Filter):
+	def filter(self, record: logging.LogRecord) -> bool:
+		return "/api/health" not in record.getMessage()
+
 # Development: logs to console only, hide access logs
 logging.basicConfig(
 	level=logging.INFO,
 	format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+uvicorn_logger = logging.getLogger("uvicorn.access")
+uvicorn_logger.setLevel(logging.INFO)
+uvicorn_logger.addFilter(HealthCheckFilter())
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
