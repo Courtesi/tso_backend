@@ -96,6 +96,7 @@ class OutcomeLine(BaseModel):
 	history: list[LineDataPoint]  # Time-ordered
 	current_best_odds: float
 	current_best_sportsbook: str
+	history_by_sportsbook: dict[str, list[LineDataPoint]] | None = None  # Optional: grouped by sportsbook
 
 	class Config:
 		json_schema_extra = {
@@ -107,7 +108,11 @@ class OutcomeLine(BaseModel):
 					{"odds": -115, "sportsbook": "DraftKings", "timestamp": 1704461410}
 				],
 				"current_best_odds": -110,
-				"current_best_sportsbook": "FanDuel"
+				"current_best_sportsbook": "FanDuel",
+				"history_by_sportsbook": {
+					"DraftKings": [{"odds": -110, "sportsbook": "DraftKings", "timestamp": 1704461400}],
+					"FanDuel": [{"odds": -110, "sportsbook": "FanDuel", "timestamp": 1704461400}]
+				}
 			}
 		}
 

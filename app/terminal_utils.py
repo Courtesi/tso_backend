@@ -65,8 +65,23 @@ async def fetch_games_with_lines(
     one_hour_ago = now - 3600
 
     for event_id, event_data in events.items():
-        # Parse event_id to extract game info
-        game_info = parse_event_id(event_id)
+        # Fetch event metadata from Redis
+        metadata_key = f"event:{event_id}"
+        metadata_raw = await redis_client.get(metadata_key)
+
+        if metadata_raw:
+            # Decode if bytes
+            if isinstance(metadata_raw, bytes):
+                metadata_raw = metadata_raw.decode('utf-8')
+
+            try:
+                game_info = json.loads(metadata_raw)
+            except json.JSONDecodeError:
+                # Fallback to parsing if metadata is corrupted
+                game_info = parse_event_id(event_id)
+        else:
+            # Fallback to parsing if metadata doesn't exist
+            game_info = parse_event_id(event_id)
 
         # Apply league filter
         if league and game_info["league"].upper() != league.upper():
@@ -78,9 +93,13 @@ async def fetch_games_with_lines(
             if game_status != game_time:
                 continue
 
-        # Build markets
+        # Build markets (MONEY only)
         markets = []
         for market_type, outcomes_dict in event_data["markets"].items():
+            # Only process MONEY markets (moneylines)
+            if market_type != "MONEY":
+                continue
+
             outcome_lines = []
 
             for outcome_id, redis_key in outcomes_dict.items():
@@ -95,7 +114,8 @@ async def fetch_games_with_lines(
                 if not raw_data:
                     continue
 
-                history = []
+                # Group history by sportsbook
+                history_by_sportsbook = {}
                 for member, score in raw_data:
                     # Decode if bytes
                     if isinstance(member, bytes):
@@ -103,23 +123,30 @@ async def fetch_games_with_lines(
 
                     try:
                         data_point = json.loads(member)
-                        history.append(LineDataPoint(**data_point))
+                        sportsbook = data_point["sportsbook"]
+
+                        if sportsbook not in history_by_sportsbook:
+                            history_by_sportsbook[sportsbook] = []
+
+                        history_by_sportsbook[sportsbook].append(LineDataPoint(**data_point))
                     except json.JSONDecodeError:
                         continue
 
-                if not history:
+                if not history_by_sportsbook:
                     continue
 
-                # Find current best odds
-                current_best = find_best_odds(history)
+                # Find current best odds across all sportsbooks
+                all_history = [point for points in history_by_sportsbook.values() for point in points]
+                current_best = find_best_odds(all_history)
 
                 outcome_line = OutcomeLine(
                     outcome_id=outcome_id,
                     outcome_name=format_outcome_name(outcome_id, market_type),
-                    history=history,
+                    history=all_history,  # All history points
                     current_best_odds=current_best["odds"],
                     current_best_sportsbook=current_best["sportsbook"]
                 )
+                outcome_line.history_by_sportsbook = history_by_sportsbook  # Add sportsbook grouping
                 outcome_lines.append(outcome_line)
 
             if outcome_lines:
@@ -131,18 +158,36 @@ async def fetch_games_with_lines(
                 markets.append(market)
 
         if markets:
-            game = GameTerminalData(
-                event_id=event_id,
-                sport=game_info["sport"],
-                league=game_info["league"],
-                home_team=game_info["home_team"],
-                away_team=game_info["away_team"],
-                matchup=f"{game_info['away_team']} @ {game_info['home_team']}",
-                start_time=game_info["start_time"],
-                game_status=get_game_status(game_info["start_time"]),
-                markets=markets
-            )
-            games.append(game)
+            # Filter: Only include games where all outcomes have at least 2 sportsbooks
+            min_sportsbooks = 2
+            all_outcomes_valid = True
+
+            for market in markets:
+                for outcome in market.outcomes:
+                    if outcome.history_by_sportsbook:
+                        num_sportsbooks = len(outcome.history_by_sportsbook)
+                        if num_sportsbooks < min_sportsbooks:
+                            all_outcomes_valid = False
+                            break
+                    else:
+                        all_outcomes_valid = False
+                        break
+                if not all_outcomes_valid:
+                    break
+
+            if all_outcomes_valid:
+                game = GameTerminalData(
+                    event_id=event_id,
+                    sport=game_info["sport"],
+                    league=game_info["league"],
+                    home_team=game_info["home_team"],
+                    away_team=game_info["away_team"],
+                    matchup=f"{game_info['away_team']} @ {game_info['home_team']}",
+                    start_time=game_info["start_time"],
+                    game_status=get_game_status(game_info["start_time"]),
+                    markets=markets
+                )
+                games.append(game)
 
     # Sort by start time
     games.sort(key=lambda g: g.start_time)
@@ -154,8 +199,8 @@ def parse_event_id(event_id: str) -> Dict:
     """
     Parse event_id to extract game components.
 
-    Event ID is flexible, but we try to extract what we can.
-    Falls back to using the event_id itself for missing info.
+    Event ID format: YYYYMMDD_TEAM1_TEAM2
+    Example: "20260106_DET_NYK"
 
     Args:
         event_id: Event identifier string
@@ -163,44 +208,92 @@ def parse_event_id(event_id: str) -> Dict:
     Returns:
         Dict with sport, league, home_team, away_team, start_time
     """
-    # Since event_id format varies by sportsbook, we'll use a simple approach
-    # The event_id typically contains team names separated by underscores
-    # Example formats seen: "nba_lakers_warriors", "mlb_yankees_redsox_20260105"
+    parts = event_id.split("_")
 
-    parts = event_id.lower().split("_")
-
-    # Try to extract league from first part if it looks like a sport/league
-    common_leagues = ["nba", "nfl", "mlb", "nhl", "ncaab", "ncaaf"]
-    league = "Unknown"
-    sport = "Unknown"
-
-    if len(parts) > 0 and parts[0] in common_leagues:
-        league = parts[0].upper()
-        sport = get_sport_from_league(league)
-        parts = parts[1:]  # Remove league from parts
-
-    # Remaining parts are typically teams and maybe date/time
-    # For now, use generic names
-    if len(parts) >= 2:
-        away_team = parts[0].title()
-        home_team = parts[1].title()
-    elif len(parts) == 1:
-        away_team = parts[0].title()
-        home_team = "TBD"
+    # Extract date from first part if it's 8 digits
+    start_time_str = None
+    if len(parts) > 0 and len(parts[0]) == 8 and parts[0].isdigit():
+        date_str = parts[0]
+        try:
+            # Parse YYYYMMDD format
+            year = int(date_str[0:4])
+            month = int(date_str[4:6])
+            day = int(date_str[6:8])
+            start_time = datetime(year, month, day, tzinfo=timezone.utc)
+            start_time_str = start_time.isoformat().replace('+00:00', 'Z')
+        except (ValueError, IndexError):
+            start_time_str = datetime.now(timezone.utc).isoformat() + "Z"
+        parts = parts[1:]  # Remove date from parts
     else:
-        away_team = "Unknown"
-        home_team = "Unknown"
+        start_time_str = datetime.now(timezone.utc).isoformat() + "Z"
 
-    # Default start time to now (will be overridden by actual data if available)
-    start_time = datetime.now(timezone.utc).isoformat() + "Z"
+    # Extract team names
+    if len(parts) >= 2:
+        home_team = parts[0].upper()  # First team is home
+        away_team = parts[1].upper()  # Second team is away
+    elif len(parts) == 1:
+        home_team = parts[0].upper()
+        away_team = "TBD"
+    else:
+        home_team = "Unknown"
+        away_team = "Unknown"
+
+    # Infer league from team abbreviations (simple heuristic)
+    league, sport = infer_league_from_teams(home_team, away_team)
 
     return {
         "sport": sport,
         "league": league,
         "away_team": away_team,
         "home_team": home_team,
-        "start_time": start_time
+        "start_time": start_time_str
     }
+
+
+def infer_league_from_teams(team1: str, team2: str) -> tuple[str, str]:
+    """
+    Infer league from team abbreviations.
+
+    Args:
+        team1: First team abbreviation
+        team2: Second team abbreviation
+
+    Returns:
+        Tuple of (league, sport)
+    """
+    # NBA teams (30 teams)
+    nba_teams = {
+        "ATL", "BOS", "BKN", "CHA", "CHI", "CLE", "DAL", "DEN", "DET", "GSW",
+        "HOU", "IND", "LAC", "LAL", "MEM", "MIA", "MIL", "MIN", "NOP", "NYK",
+        "OKC", "ORL", "PHI", "PHX", "POR", "SAC", "SAS", "TOR", "UTA", "WAS"
+    }
+
+    # NFL teams (32 teams)
+    nfl_teams = {
+        "ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN",
+        "DET", "GB", "HOU", "IND", "JAX", "KC", "LAC", "LAR", "LV", "MIA",
+        "MIN", "NE", "NO", "NYG", "NYJ", "PHI", "PIT", "SEA", "SF", "TB",
+        "TEN", "WAS"
+    }
+
+    # NHL teams (32 teams)
+    nhl_teams = {
+        "ANA", "ARI", "BOS", "BUF", "CAR", "CBJ", "CGY", "CHI", "COL", "DAL",
+        "DET", "EDM", "FLA", "LAK", "MIN", "MTL", "NJD", "NSH", "NYI", "NYR",
+        "OTT", "PHI", "PIT", "SEA", "SJS", "STL", "TBL", "TOR", "VAN", "VGK",
+        "WPG", "WSH"
+    }
+
+    # Check which league the teams belong to
+    if team1 in nba_teams or team2 in nba_teams:
+        return "NBA", "Basketball"
+    elif team1 in nfl_teams or team2 in nfl_teams:
+        return "NFL", "Football"
+    elif team1 in nhl_teams or team2 in nhl_teams:
+        return "NHL", "Hockey"
+    else:
+        # Default to unknown or could add NCAAB, MLB, etc.
+        return "Unknown", "Unknown"
 
 
 def get_sport_from_league(league: str) -> str:
