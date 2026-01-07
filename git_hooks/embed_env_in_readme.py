@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Auto-embeds secrets/.env.example content into README.md between markers.
+Auto-embeds .env.example content into README.md between markers.
 Runs automatically via pre-commit hook.
 """
 import re
@@ -8,12 +8,12 @@ import sys
 from pathlib import Path
 
 def embed_env_in_readme():
-    """Replace content between markers with current secrets/.env.example content."""
+    """Replace content between markers with current .env.example content."""
 
     # Define file paths (relative to script location)
     script_dir = Path(__file__).parent
     project_root = script_dir.parent
-    env_file = project_root / "secrets" / ".env.example"
+    env_file = project_root / ".env.example"
     readme_file = project_root / "README.md"
 
     # Validate files exist

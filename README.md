@@ -20,25 +20,24 @@ FastAPI backend service for TrueShot Odds arbitrage betting platform.
 
 3. Set up secrets:
    ```bash
-   mkdir -p secrets
-   cp secrets/.env.example secrets/.env
-   # Edit secrets/.env with your actual credentials
+   cp .env.example .env
+   # Edit .env with your actual credentials
    ```
 
 4. Add your Firebase service account JSON:
    ```bash
-   # Place your service-account.json in secrets/
-   cp /path/to/your/service-account.json secrets/service-account.json
+   # Place your service-account.json in webscraper/
+   cp /path/to/your/service-account.json service-account.json
    ```
 
 ### Configuration
 
-The backend requires the following environment variables (see `secrets/.env.example`):
+The backend requires the following environment variables (see `.env.example`):
 
 <!-- ENV_EXAMPLE_START -->
 ```env
 ENV=development
-FRONTEND_URL={LINK_TO_FRONTEND}(ex: http://localhost:5173)
+FRONTEND_URL=... # eg: http://localhost:5173
 
 GOOGLE_APPLICATION_CREDENTIALS=./service-account.json
 STRIPE_SECRET_KEY=sk_test_...
@@ -104,12 +103,13 @@ backend/
 ├── app/
 │   ├── main.py           # FastAPI application entry point
 │   ├── config.py         # Settings and environment variables
+│   ├── redis.py		  # Redis Client singleton for cache access
+│   ├── terminal_utils.py # Terminal functions for line-tracking
 │   └── router.py         # API route definitions
-├── secrets/
-│   ├── .env.example      # Environment variable template
-│   ├── .env              # Your actual credentials (gitignored)
-│   └── service-account.json  # Firebase credentials (gitignored)
-├── scripts/
+├── .env.example      # Environment variable template
+├── .env              # Your actual credentials (gitignored)
+├── service-account.json  # Firebase credentials (gitignored)
+├── git_hooks/
 │   └── embed_env_in_readme.py  # Auto-update README script
 ├── Dockerfile
 ├── pyproject.toml
