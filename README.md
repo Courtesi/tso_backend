@@ -37,13 +37,17 @@ The backend requires the following environment variables (see `.env.example`):
 <!-- ENV_EXAMPLE_START -->
 ```env
 ENV=development
+
+# For Stripe redirects
 FRONTEND_URL=... # eg: http://localhost:5173
 
+# 3rd party secrets
 GOOGLE_APPLICATION_CREDENTIALS=./service-account.json
 STRIPE_SECRET_KEY=sk_test_...
 RESEND_API_KEY=re_...
 RESEND_EMAIL=support@trueshotodds.com
 
+# Redis Configuration
 REDIS_HOST=localhost
 REDIS_PORT=6379
 REDIS_DB=0
