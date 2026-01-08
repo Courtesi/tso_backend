@@ -274,7 +274,7 @@ def format_outcome_name(outcome_id: str, market_type: str) -> str:
 	if market_type == "MONEY":
 		# Moneyline: team name + ML
 		if len(parts) >= 1:
-			return f"{parts[0].title()} ML"
+			return f"{parts[0].title()}"
 	elif market_type == "TOTAL":
 		# Total: over/under + value
 		if len(parts) >= 2:
