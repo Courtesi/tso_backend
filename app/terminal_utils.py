@@ -304,3 +304,20 @@ def format_market_display(market_type: str) -> str:
 		"TOTAL": "Total"
 	}
 	return mapping.get(market_type, market_type.title())
+
+
+def filter_terminal_data(games: List[Dict], game_time: Optional[str] = None) -> List[Dict]:
+	"""
+	Apply game_time filter to cached terminal data.
+
+	Args:
+		games: List of game dictionaries
+		game_time: Filter by game status ("upcoming", "live", or None for all)
+
+	Returns:
+		Filtered list of games
+	"""
+	if not game_time or game_time == "all":
+		return games
+
+	return [g for g in games if g.get("game_status") == game_time]

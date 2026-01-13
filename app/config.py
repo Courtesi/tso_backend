@@ -39,6 +39,11 @@ class Settings(BaseSettings):
 		"premium": None
 	}
 
+	# WebSocket settings
+	WEBSOCKET_PING_INTERVAL: int = 30  # seconds
+	WEBSOCKET_PONG_TIMEOUT: int = 10   # seconds
+	MAX_CONNECTIONS_PER_USER: int = 5
+
 	class Config:
 		env_file = ".env"
 		# extra = "ignore"  # Ignore extra fields in .env that aren't defined here

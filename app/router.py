@@ -172,13 +172,21 @@ async def stream_terminal_data(
 	game_time: Optional[str] = None
 ):
 	"""
-	Stream terminal data (line movements) via SSE.
+	Stream terminal data (line movements) via SSE using Redis pub/sub.
 
 	Query params:
 	- league: Filter by league (NBA, NFL, etc.)
 	- game_time: Filter by game status (upcoming, live)
 	"""
 	tier = user.get("tier", "free")
+
+	# Choose cache key/channel based on league filter
+	if league:
+		cache_key = f"{settings.REDIS_KEY_PREFIX}terminal:{league.upper()}"
+	else:
+		cache_key = f"{settings.REDIS_KEY_PREFIX}terminal:all"
+
+	channel = f"{cache_key}:updates"
 
 	async def event_generator():
 		pubsub_redis = redis.Redis(
@@ -190,50 +198,77 @@ async def stream_terminal_data(
 		)
 
 		try:
-			# For now, we'll poll for data every 10 seconds and send updates
-			# In production, this would subscribe to a pub/sub channel
+			# Subscribe to pub/sub channel
+			pubsub = pubsub_redis.pubsub()
+			await pubsub.subscribe(channel)
+
+			# Send initial cached data
+			cached_data_raw = await redis_client.get(cache_key)
+			if cached_data_raw:
+				# Parse JSON string
+				cached_data = json.loads(cached_data_raw)
+
+				# Apply game_time filter
+				filtered_data = terminal_utils.filter_terminal_data(
+					cached_data.get("data", []),
+					game_time=game_time
+				)
+
+				# Apply tier limits
+				max_games = settings.TIER_MAX_GAMES.get(tier)
+				if max_games:
+					filtered_data = filtered_data[:max_games]
+
+				response_data = {
+					"tier": tier,
+					"data": filtered_data,
+					"metadata": cached_data.get("metadata", {}),
+					"cached_at": cached_data.get("cached_at")
+				}
+				yield f"data: {json.dumps(response_data)}\n\n"
+			else:
+				yield f"data: {json.dumps({'tier': tier, 'data': [], 'message': 'No data available yet'})}\n\n"
+
+			# Subscribe to updates
 			while True:
 				# Check if client disconnected
 				if await request.is_disconnected():
 					break
 
-				try:
-					# Fetch games with lines from Redis
-					games = await terminal_utils.fetch_games_with_lines(
-						redis_client.redis,
-						league=league,
+				# Wait for message with timeout (so we can check disconnect status)
+				message = await asyncio.wait_for(
+					pubsub.get_message(ignore_subscribe_messages=True, timeout=1),
+					timeout=2.0
+				)
+
+				if message and message["type"] == "message":
+					# Parse the data
+					cache_data = json.loads(message["data"])
+
+					# Apply game_time filter
+					filtered_data = terminal_utils.filter_terminal_data(
+						cache_data.get("data", []),
 						game_time=game_time
 					)
 
 					# Apply tier limits
 					max_games = settings.TIER_MAX_GAMES.get(tier)
-					if max_games and len(games) > max_games:
-						games = games[:max_games]
-
-					# Convert Pydantic models to dicts
-					games_data = [game.model_dump() for game in games]
+					if max_games:
+						filtered_data = filtered_data[:max_games]
 
 					response_data = {
 						"tier": tier,
-						"data": games_data,
-						"metadata": {
-							"count": len(games_data),
-							"league": league or "all",
-							"game_time": game_time or "all"
-						},
-						"cached_at": datetime.now(timezone.utc).isoformat() + "Z"
+						"data": filtered_data,
+						"metadata": cache_data.get("metadata", {}),
+						"cached_at": cache_data.get("cached_at")
 					}
 
 					# Send as SSE event
 					yield f"data: {json.dumps(response_data)}\n\n"
-
-					# Wait before next update
-					await asyncio.sleep(10)
-
-				except Exception as e:
-					logger.error(f"Error fetching terminal data: {e}")
-					yield f"data: {json.dumps({'error': 'Failed to fetch terminal data'})}\n\n"
-					await asyncio.sleep(10)
+				else:
+					# No message, send heartbeat comment to keep connection alive
+					yield ": heartbeat\n\n"
+					await asyncio.sleep(15)
 
 		except asyncio.CancelledError:
 			# Client disconnected
@@ -243,6 +278,8 @@ async def stream_terminal_data(
 			yield f"data: {json.dumps({'error': 'Stream error occurred'})}\n\n"
 		finally:
 			# Cleanup
+			await pubsub.unsubscribe(channel)
+			await pubsub.close()
 			await pubsub_redis.close()
 
 	return StreamingResponse(
@@ -263,35 +300,47 @@ async def get_terminal_data(
 	game_time: Optional[str] = None
 ):
 	"""
-	Polling fallback for terminal data (same filters as stream).
+	Polling fallback for terminal data (uses cached aggregates).
 	"""
 	tier = user.get("tier", "free")
 
+	# Choose cache key based on league filter
+	if league:
+		cache_key = f"{settings.REDIS_KEY_PREFIX}terminal:{league.upper()}"
+	else:
+		cache_key = f"{settings.REDIS_KEY_PREFIX}terminal:all"
+
 	try:
-		# Fetch games with lines from Redis
-		games = await terminal_utils.fetch_games_with_lines(
-			redis_client.redis,
-			league=league,
+		# Get cached data from Redis
+		cached_data_raw = await redis_client.get(cache_key)
+
+		if cached_data_raw is None:
+			return {
+				"tier": tier,
+				"data": [],
+				"metadata": None,
+				"message": "No terminal data available yet. Please try again shortly."
+			}
+
+		# Parse JSON string
+		cached_data = json.loads(cached_data_raw)
+
+		# Apply game_time filter
+		filtered_data = terminal_utils.filter_terminal_data(
+			cached_data.get("data", []),
 			game_time=game_time
 		)
 
 		# Apply tier limits
 		max_games = settings.TIER_MAX_GAMES.get(tier)
-		if max_games and len(games) > max_games:
-			games = games[:max_games]
-
-		# Convert Pydantic models to dicts
-		games_data = [game.model_dump() for game in games]
+		if max_games:
+			filtered_data = filtered_data[:max_games]
 
 		return {
 			"tier": tier,
-			"data": games_data,
-			"metadata": {
-				"count": len(games_data),
-				"league": league or "all",
-				"game_time": game_time or "all"
-			},
-			"cached_at": datetime.now(timezone.utc).isoformat() + "Z"
+			"data": filtered_data,
+			"metadata": cached_data.get("metadata", {}),
+			"cached_at": cached_data.get("cached_at")
 		}
 
 	except Exception as e:

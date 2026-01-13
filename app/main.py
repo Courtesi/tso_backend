@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
 from app.router import router
+from app.websocket_router import router as ws_router
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
@@ -45,6 +46,7 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
+app.include_router(ws_router, prefix="/api")
 
 # Initialize Firebase Admin SDK with service account
 cred = credentials.Certificate(settings.GOOGLE_APPLICATION_CREDENTIALS)
