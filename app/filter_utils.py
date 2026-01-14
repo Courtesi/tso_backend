@@ -60,7 +60,13 @@ def apply_terminal_filters(games: List[dict], filters: dict, tier: str) -> List[
     """
     filtered = games
 
-    # League filter
+    # Apply tier-based league restrictions first (before user's league filter)
+    allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
+    if allowed_leagues:
+        allowed_set = set(league.upper() for league in allowed_leagues)
+        filtered = [g for g in filtered if g.get("league", "").upper() in allowed_set]
+
+    # User's league filter (further narrows down if specified)
     league = filters.get("league")
     if league and league != "all":
         filtered = [g for g in filtered if g.get("league", "").upper() == league.upper()]

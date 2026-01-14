@@ -39,6 +39,11 @@ class Settings(BaseSettings):
 		"premium": None
 	}
 
+	TIER_ALLOWED_LEAGUES: dict = {
+		"free": ["NBA", "NFL", "MLB"],
+		"premium": None  # None means all leagues allowed
+	}
+
 	# WebSocket settings
 	WEBSOCKET_PING_INTERVAL: int = 30  # seconds
 	WEBSOCKET_PONG_TIMEOUT: int = 10   # seconds
