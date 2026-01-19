@@ -30,6 +30,43 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
     if max_arbs:
         filtered = filtered[:max_arbs]
 
+    # Apply minimum profit filter
+    min_profit = filters.get("min_profit")
+    if min_profit is not None:
+        try:
+            min_profit_val = float(min_profit)
+            if min_profit_val > 0:
+                filtered = [
+                    arb for arb in filtered
+                    if arb.get("profit_percentage", 0) >= min_profit_val
+                ]
+        except (ValueError, TypeError):
+            pass
+
+    # Apply league filter
+    league = filters.get("league")
+    if league and league.lower() != "all":
+        filtered = [
+            arb for arb in filtered
+            if arb.get("league", "").upper() == league.upper()
+        ]
+
+    # Apply market type filter
+    market_type = filters.get("market_type")
+    if market_type:
+        if isinstance(market_type, str):
+            market_types = [market_type.lower()]
+        elif isinstance(market_type, list) and len(market_type) > 0:
+            market_types = [m.lower() for m in market_type]
+        else:
+            market_types = None
+
+        if market_types:
+            filtered = [
+                arb for arb in filtered
+                if arb.get("market", "").lower() in market_types
+            ]
+
     # Apply sportsbook filter
     sportsbooks_filter = filters.get("sportsbooks")
     if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:

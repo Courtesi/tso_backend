@@ -43,6 +43,7 @@ FRONTEND_URL=... # eg: http://localhost:5173
 
 # 3rd party secrets
 GOOGLE_APPLICATION_CREDENTIALS=./service-account.json
+# Webhook secret key
 STRIPE_SECRET_KEY=sk_test_...
 RESEND_API_KEY=re_...
 RESEND_EMAIL=support@trueshotodds.com

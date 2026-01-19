@@ -57,3 +57,64 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
 	"""Retrieves the fastapi settings"""
 	return Settings()
+
+# Sportsbook configuration - maps normalized names to icon filenames and display names
+SPORTSBOOKS = {
+	"ballybet": {"icon": "ballybet.avif", "display_name": "Bally Bet"},
+	"bally": {"icon": "ballybet.avif", "display_name": "Bally Bet"},
+	"bet105": {"icon": "bet105.png", "display_name": "Bet105"},
+	"bet365": {"icon": "bet365.png", "display_name": "Bet365"},
+	"betmgm": {"icon": "betmgm.avif", "display_name": "BetMGM"},
+	"betparx": {"icon": "betparx.png", "display_name": "BetParx"},
+	"betr": {"icon": "betr.png", "display_name": "Betr"},
+	"betrivers": {"icon": "betrivers.avif", "display_name": "BetRivers"},
+	"betus": {"icon": "betus.png", "display_name": "BetUS"},
+	"betwhale": {"icon": "betwhale.png", "display_name": "BetWhale"},
+	"bodog": {"icon": "bodog.png", "display_name": "Bodog"},
+	"borgata": {"icon": "borgata.avif", "display_name": "Borgata"},
+	"bovada": {"icon": "bovada.png", "display_name": "Bovada"},
+	"caesars": {"icon": "caesars.avif", "display_name": "Caesars"},
+	"circa": {"icon": "circa.png", "display_name": "Circa"},
+	"crabsports": {"icon": "crabsports.avif", "display_name": "Crab Sports"},
+	"desertdiamond": {"icon": "desertdiamond.avif", "display_name": "Desert Diamond"},
+	"draftkings": {"icon": "draftkings.avif", "display_name": "DraftKings"},
+	"espnbet": {"icon": "espnbet.png", "display_name": "ESPN Bet"},
+	"fanatics": {"icon": "fanatics.avif", "display_name": "Fanatics"},
+	"fanduel": {"icon": "fanduel.avif", "display_name": "FanDuel"},
+	"fliff": {"icon": "fliff.png", "display_name": "Fliff"},
+	"hardrockbet": {"icon": "hardrockbet.avif", "display_name": "Hard Rock Bet"},
+	"hardrock": {"icon": "hardrockbet.avif", "display_name": "Hard Rock Bet"},
+	"mybookie": {"icon": "mybookie.png", "display_name": "MyBookie"},
+	"novig": {"icon": "novig.webp", "display_name": "Novig"},
+	"pinnacle": {"icon": "pinnacle.png", "display_name": "Pinnacle"},
+	"prophetx": {"icon": "prophetx.png", "display_name": "ProphetX"},
+	"rebet": {"icon": "rebet.png", "display_name": "Rebet"},
+	"sporttrade": {"icon": "sporttrade.avif", "display_name": "Sporttrade"},
+	"sportzino": {"icon": "sportzino.jfif", "display_name": "Sportzino"},
+	"thescore": {"icon": "thescore.png", "display_name": "theScore"},
+	"unibet": {"icon": "unibet.png", "display_name": "Unibet"},
+	"kalshi": {"icon": "kalshi.png", "display_name": "Kalshi"},
+}
+
+# Tier features configuration for subscription page
+TIER_FEATURES = {
+	"free": {
+		"name": "Free",
+		"description": "Use Trueshot's basic features",
+		"price": "$0",
+		"features": [
+			"Odds charts (Available leagues)",
+			"Access to 5 arbitrage bets at a time",
+			"Finds bets every 60 seconds",
+		]
+	},
+	"premium": {
+		"name": "Premium",
+		"description": "Full access to all features",
+		"features_intro": "Everything in Free, and:",
+		"features": [
+			"Access to unlimited arbitrage bets",
+			"Real time updates on bets",
+		]
+	}
+}

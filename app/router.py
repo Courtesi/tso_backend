@@ -7,7 +7,7 @@ import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)
 
-from app.config import get_settings
+from app.config import get_settings, SPORTSBOOKS, TIER_FEATURES
 from app.dependencies import get_firebase_user_from_token, get_user_with_tier_from_query, get_user_with_tier_from_either
 from app.redis import redis_client
 from app import terminal_utils
@@ -31,6 +31,27 @@ resend.api_key = settings.RESEND_API_KEY
 @router.get("/health")
 async def health_check():
 	return {"status": "healthy"}
+
+
+# ==================== PUBLIC CONFIG ENDPOINTS ====================
+
+@router.get("/config/sportsbooks")
+async def get_sportsbooks():
+	"""
+	Returns sportsbook configuration data (icons and display names).
+	Public endpoint - no authentication required.
+	"""
+	return {"sportsbooks": SPORTSBOOKS}
+
+
+@router.get("/config/tiers")
+async def get_tiers():
+	"""
+	Returns tier features configuration for the subscription page.
+	Public endpoint - no authentication required.
+	"""
+	return {"tiers": TIER_FEATURES}
+
 
 @router.get("/data/arbs/stream")
 async def stream_arbs(request: Request, user: Annotated[dict, Depends(get_user_with_tier_from_query)]):
