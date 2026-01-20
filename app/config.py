@@ -114,7 +114,7 @@ TIER_FEATURES = {
 		"features_intro": "Everything in Free, and:",
 		"features": [
 			"Access to unlimited arbitrage bets",
-			"Real time updates on bets",
+			"Real time updates on bets and lines",
 		]
 	}
 }
