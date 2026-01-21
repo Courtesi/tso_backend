@@ -94,6 +94,7 @@ SPORTSBOOKS = {
 	"thescore": {"icon": "thescore.png", "display_name": "theScore"},
 	"unibet": {"icon": "unibet.png", "display_name": "Unibet"},
 	"kalshi": {"icon": "kalshi.png", "display_name": "Kalshi"},
+	"polymarket": {"icon": "polymarket.png", "display_name": "Polymarket"}
 }
 
 # Tier features configuration for subscription page
