@@ -109,8 +109,8 @@ class WebSocketManager:
         if not conn.authenticated:
             raise ValueError("Connection not authenticated")
 
-        # Store subscription with filters
-        conn.subscriptions[stream] = filters
+        # Store subscription with filters (copy to prevent reference issues)
+        conn.subscriptions[stream] = dict(filters)
 
         # Determine Redis channel based on stream and tier
         if stream == "arbs":
@@ -160,7 +160,9 @@ class WebSocketManager:
 
         # Update filters for all active subscriptions
         for stream in conn.subscriptions:
+            # Merge new filters with existing subscription filters
             conn.subscriptions[stream].update(filters)
+            merged_filters = conn.subscriptions[stream]
 
             # Determine cache key and send filtered data immediately
             if stream == "arbs":
@@ -173,8 +175,9 @@ class WebSocketManager:
             else:
                 continue
 
-            # Send re-filtered data immediately
-            await self._send_filtered_data(connection_id, stream, filters, cache_key)
+            # Send re-filtered data immediately using merged filters
+            logger.debug(f"Applying merged filters for {stream}: {merged_filters}")
+            await self._send_filtered_data(connection_id, stream, merged_filters, cache_key)
 
         logger.info(f"Updated filters for {connection_id}: {filters}")
 

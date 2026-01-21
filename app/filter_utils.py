@@ -43,6 +43,21 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
         except (ValueError, TypeError):
             pass
 
+    # Apply maximum profit filter
+    max_profit = filters.get("max_profit")
+    logger.debug(f"max_profit filter value: {max_profit} (type: {type(max_profit).__name__})")
+    if max_profit is not None:
+        try:
+            max_profit_val = float(max_profit)
+            before_count = len(filtered)
+            filtered = [
+                arb for arb in filtered
+                if arb.get("profit_percentage", 0) <= max_profit_val
+            ]
+            logger.debug(f"max_profit filter applied: {before_count} -> {len(filtered)} arbs (max: {max_profit_val}%)")
+        except (ValueError, TypeError) as e:
+            logger.warning(f"Failed to apply max_profit filter: {e}")
+
     # Apply league filter
     league = filters.get("league")
     if league and league.lower() != "all":
