@@ -39,6 +39,8 @@ class Settings(BaseSettings):
 		"premium": None
 	}
 
+	ALL_LEAGUES: list = ["NBA", "NFL", "NHL", "MLB", "NCAAB", "NCAAF"]
+
 	TIER_ALLOWED_LEAGUES: dict = {
 		"free": ["NBA", "NFL", "MLB"],
 		"premium": None  # None means all leagues allowed

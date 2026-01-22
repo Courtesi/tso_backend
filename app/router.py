@@ -48,9 +48,23 @@ async def get_sportsbooks():
 async def get_tiers():
 	"""
 	Returns tier features configuration for the subscription page.
+	Also includes tier limits (allowed leagues, max games, etc).
 	Public endpoint - no authentication required.
 	"""
-	return {"tiers": TIER_FEATURES}
+	# Combine display features with tier limits
+	tier_data = {}
+	for tier_name, features in TIER_FEATURES.items():
+		tier_data[tier_name] = {
+			**features,
+			"allowed_leagues": settings.TIER_ALLOWED_LEAGUES.get(tier_name),
+			"max_games": settings.TIER_MAX_GAMES.get(tier_name),
+			"max_arbs": settings.TIER_MAX_ARBS.get(tier_name),
+		}
+
+	return {
+		"tiers": tier_data,
+		"all_leagues": settings.ALL_LEAGUES,
+	}
 
 
 @router.get("/data/arbs/stream")
