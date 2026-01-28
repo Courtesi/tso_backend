@@ -39,6 +39,11 @@ class Settings(BaseSettings):
 		"premium": None
 	}
 
+	TIER_MAX_EVS: dict = {
+		"free": 5,
+		"premium": None
+	}
+
 	ALL_LEAGUES: list = ["NBA", "NFL", "NHL", "MLB", "NCAAB", "NCAAF"]
 
 	TIER_ALLOWED_LEAGUES: dict = {

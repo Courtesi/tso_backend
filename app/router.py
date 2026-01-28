@@ -197,6 +197,58 @@ async def get_arbs(user: Annotated[dict, Depends(get_user_with_tier_from_either)
 	}
 
 
+@router.get("/data/ev")
+async def get_ev_bets(user: Annotated[dict, Depends(get_user_with_tier_from_either)]):
+	"""
+	Get Expected Value betting opportunities.
+	Uses prediction market odds as "true odds" to find +EV bets against sportsbooks.
+	"""
+	tier = user.get("tier", "free")
+	logger.info(f"EV bets request - User tier: {tier}")
+
+	# EV data cache key (uses same tier-based approach as arbs)
+	cache_key = f"{settings.REDIS_KEY_PREFIX}ev:{tier}"
+
+	try:
+		# Get cached data from Redis
+		cached_data_raw = await redis_client.get(cache_key)
+
+		if cached_data_raw is None:
+			return {
+				"tier": tier,
+				"data": [],
+				"metadata": None,
+				"message": "No EV betting data available yet. Please try again shortly."
+			}
+
+		# Parse JSON string
+		cached_data = json.loads(cached_data_raw)
+
+		# Get EV bets
+		ev_bets = cached_data.get("data", [])
+
+		# Apply tier limits
+		max_evs = settings.TIER_MAX_EVS.get(tier)
+		if max_evs:
+			ev_bets = ev_bets[:max_evs]
+
+		return {
+			"tier": tier,
+			"data": ev_bets,
+			"metadata": cached_data.get("metadata"),
+			"cached_at": cached_data.get("cached_at")
+		}
+
+	except Exception as e:
+		logger.error(f"Error fetching EV data: {e}")
+		return {
+			"tier": tier,
+			"data": [],
+			"metadata": None,
+			"message": f"Error fetching EV data: {str(e)}"
+		}
+
+
 # ==================== TERMINAL/LINE MOVEMENT ENDPOINTS ====================
 
 @router.get("/data/terminal/stream")

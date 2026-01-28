@@ -121,6 +121,9 @@ class WebSocketManager:
             # This prevents issues when league filter changes
             cache_key = "terminal:all"
             channel = f"{settings.REDIS_KEY_PREFIX}{cache_key}:updates"
+        elif stream == "ev":
+            cache_key = f"ev:{conn.tier}"
+            channel = f"{settings.REDIS_KEY_PREFIX}ev:{conn.tier}:updates"
         else:
             raise ValueError(f"Unknown stream: {stream}")
 
@@ -172,6 +175,8 @@ class WebSocketManager:
                 # ALWAYS fetch from "all" cache and apply league filter
                 # This ensures consistency with Redis pub/sub subscription
                 cache_key = f"{settings.REDIS_KEY_PREFIX}terminal:all"
+            elif stream == "ev":
+                cache_key = f"{settings.REDIS_KEY_PREFIX}ev:{conn.tier}"
             else:
                 continue
 
@@ -315,6 +320,12 @@ class WebSocketManager:
                         filters,
                         conn.tier
                     )
+                elif stream == "ev":
+                    filtered_data = filter_utils.apply_ev_filters(
+                        cached_data.get("data", []),
+                        filters,
+                        conn.tier
+                    )
                 else:
                     filtered_data = cached_data.get("data", [])
 
@@ -376,7 +387,12 @@ class WebSocketManager:
                         cache_data = json.loads(message["data"])
 
                         # Determine stream type from channel
-                        stream = "arbs" if "arbs" in channel else "terminal"
+                        if "arbs" in channel:
+                            stream = "arbs"
+                        elif "ev:" in channel:
+                            stream = "ev"
+                        else:
+                            stream = "terminal"
 
                         # Get current filters
                         filters = conn.subscriptions.get(stream, {})
@@ -390,6 +406,12 @@ class WebSocketManager:
                             )
                         elif stream == "terminal":
                             filtered_data = filter_utils.apply_terminal_filters(
+                                cache_data.get("data", []),
+                                filters,
+                                conn.tier
+                            )
+                        elif stream == "ev":
+                            filtered_data = filter_utils.apply_ev_filters(
                                 cache_data.get("data", []),
                                 filters,
                                 conn.tier

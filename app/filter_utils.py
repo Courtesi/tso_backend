@@ -58,13 +58,21 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
         except (ValueError, TypeError) as e:
             logger.warning(f"Failed to apply max_profit filter: {e}")
 
-    # Apply league filter
+    # Apply league filter (supports single string or list of leagues)
     league = filters.get("league")
-    if league and league.lower() != "all":
-        filtered = [
-            arb for arb in filtered
-            if arb.get("league", "").upper() == league.upper()
-        ]
+    if league:
+        if isinstance(league, str):
+            if league.lower() != "all":
+                filtered = [
+                    arb for arb in filtered
+                    if arb.get("league", "").upper() == league.upper()
+                ]
+        elif isinstance(league, list) and len(league) > 0:
+            league_set = set(specific_league.upper() for specific_league in league)
+            filtered = [
+                arb for arb in filtered
+                if arb.get("league", "").upper() in league_set
+            ]
 
     # Apply market type filter
     market_type = filters.get("market_type")
@@ -119,9 +127,15 @@ def apply_terminal_filters(games: List[dict], filters: dict, tier: str) -> List[
         filtered = [g for g in filtered if g.get("league", "").upper() in allowed_set]
 
     # User's league filter (further narrows down if specified)
+    # Supports single string or list of leagues
     league = filters.get("league")
-    if league and league != "all":
-        filtered = [g for g in filtered if g.get("league", "").upper() == league.upper()]
+    if league:
+        if isinstance(league, str):
+            if league.lower() != "all":
+                filtered = [g for g in filtered if g.get("league", "").upper() == league.upper()]
+        elif isinstance(league, list) and len(league) > 0:
+            league_set = set(specific_league.upper() for specific_league in league)
+            filtered = [g for g in filtered if g.get("league", "").upper() in league_set]
 
     # Game time filter
     game_time = filters.get("game_time")
@@ -138,6 +152,85 @@ def apply_terminal_filters(games: List[dict], filters: dict, tier: str) -> List[
     if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
         sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
         filtered = apply_sportsbook_filter_to_games(filtered, sportsbooks_set)
+
+    return filtered
+
+
+def apply_ev_filters(ev_bets: List[dict], filters: dict, tier: str) -> List[dict]:
+    """
+    Apply filters to EV betting data.
+
+    Args:
+        ev_bets: List of EV betting opportunities
+        filters: Filter configuration dict with keys:
+            - min_ev: Minimum EV percentage (optional)
+            - confidence: List of confidence levels to include (optional)
+            - league: League filter (optional)
+            - sportsbooks: List of sportsbook names to include (optional)
+        tier: User tier ("free" or "premium")
+
+    Returns:
+        Filtered list of EV betting opportunities
+    """
+    filtered = ev_bets
+
+    # Apply tier-based league restrictions first
+    allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
+    if allowed_leagues:
+        allowed_set = set(league.upper() for league in allowed_leagues)
+        filtered = [ev for ev in filtered if ev.get("league", "").upper() in allowed_set]
+
+    # Apply tier limits
+    max_evs = settings.TIER_MAX_EVS.get(tier)
+    if max_evs:
+        filtered = filtered[:max_evs]
+
+    # Apply minimum EV filter
+    min_ev = filters.get("min_ev")
+    if min_ev is not None:
+        try:
+            min_ev_val = float(min_ev)
+            if min_ev_val > 0:
+                filtered = [
+                    ev for ev in filtered
+                    if ev.get("expected_value", 0) >= min_ev_val
+                ]
+        except (ValueError, TypeError):
+            pass
+
+    # Apply confidence filter
+    confidence_filter = filters.get("confidence")
+    if confidence_filter and isinstance(confidence_filter, list) and len(confidence_filter) > 0:
+        confidence_set = set(c.upper() for c in confidence_filter)
+        filtered = [
+            ev for ev in filtered
+            if ev.get("confidence", "").upper() in confidence_set
+        ]
+
+    # Apply league filter (supports single string or list of leagues)
+    league = filters.get("league")
+    if league:
+        if isinstance(league, str):
+            if league.lower() != "all":
+                filtered = [
+                    ev for ev in filtered
+                    if ev.get("league", "").upper() == league.upper()
+                ]
+        elif isinstance(league, list) and len(league) > 0:
+            league_set = set(specific_league.upper() for specific_league in league)
+            filtered = [
+                ev for ev in filtered
+                if ev.get("league", "").upper() in league_set
+            ]
+
+    # Apply sportsbook filter (excludes Kalshi/Polymarket since they're prediction markets)
+    sportsbooks_filter = filters.get("sportsbooks")
+    if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
+        sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
+        filtered = [
+            ev for ev in filtered
+            if ev.get("bet", {}).get("sportsbook", "").lower() in sportsbooks_set
+        ]
 
     return filtered
 

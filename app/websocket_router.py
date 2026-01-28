@@ -61,7 +61,7 @@ async def handle_message(connection_id: str, message: Dict):
                 })
                 return
 
-            if stream not in ["arbs", "terminal"]:
+            if stream not in ["arbs", "terminal", "ev"]:
                 await ws_manager.send_message(connection_id, {
                     "type": "error",
                     "code": "INVALID_STREAM",
