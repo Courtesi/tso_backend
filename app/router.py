@@ -1,6 +1,6 @@
 import asyncio
 import json
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, Request, UploadFile
 from typing import Annotated, Optional
 import logging
 import redis.asyncio as redis
@@ -569,7 +569,7 @@ async def delete_account(user: Annotated[dict, Depends(get_firebase_user_from_to
 @router.post("/create-portal-session")
 async def create_portal_session(
 	user: Annotated[dict, Depends(get_firebase_user_from_token)],
-	return_url: str = None
+	return_url: str = Body(None, alias="returnUrl")
 ):
 	"""
 	Creates a Stripe Customer Portal session for the authenticated user
@@ -579,25 +579,16 @@ async def create_portal_session(
 		# Get user's UID from Firebase token
 		uid = user.get("uid")
 
-		# In Stripe, the customer ID is stored in Firestore at customers/{uid}
-		# We need to get it from there, but for now we'll use the UID as customer ID
-		# The Firebase Stripe extension creates customers with metadata['firebaseUID'] = uid
+		# Search for the customer by Firebase UID using Stripe Search API
+		result = stripe.Customer.search(query=f'metadata["firebaseUID"]:"{uid}"')
 
-		# Search for the customer by Firebase UID in metadata
-		# customers = stripe.Customer.list(limit=1).data
-		customer_id = None
-
-		# Try to find customer with matching Firebase UID
-		for customer in stripe.Customer.list(limit=100).auto_paging_iter():
-			if customer.metadata.get('firebaseUID') == uid:
-				customer_id = customer.id
-				break
-
-		if not customer_id:
+		if not result.data:
 			raise HTTPException(
 				status_code=404,
 				detail="No Stripe customer found for this user. Please complete a purchase first."
 			)
+
+		customer_id = result.data[0].id
 
 		# Create the portal session
 		session = stripe.billing_portal.Session.create(
@@ -607,12 +598,16 @@ async def create_portal_session(
 
 		return {"url": session.url}
 
-	except stripe.error.StripeError as e:
+	except stripe.StripeError as e:
+		logger.error(f"Stripe error creating portal session: {e}")
 		raise HTTPException(
 			status_code=400,
 			detail=f"Stripe error: {str(e)}"
 		)
+	except HTTPException:
+		raise
 	except Exception as e:
+		logger.error(f"Error creating portal session: {e}")
 		raise HTTPException(
 			status_code=500,
 			detail=f"Internal server error: {str(e)}"
