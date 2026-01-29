@@ -458,7 +458,7 @@ async def get_line_history(
 	- outcome_id: Specific outcome identifier
 
 	Query params:
-	- start_time: Unix timestamp (default: 1 hour ago)
+	- start_time: Unix timestamp (default: LINES_TTL seconds ago)
 	- end_time: Unix timestamp (default: now)
 	"""
 	# tier = user.get("tier", "free")
@@ -466,9 +466,10 @@ async def get_line_history(
 	# Construct Redis key
 	key = f"lines:{event_id}:{market_type}:{outcome_id}"
 
-	# Default time range: last hour
+	# Default time range: match lines TTL
+	settings = get_settings()
 	now = int(time.time())
-	start = start_time if start_time else now - 3600
+	start = start_time if start_time else now - settings.LINES_TTL
 	end = end_time if end_time else now
 
 	try:

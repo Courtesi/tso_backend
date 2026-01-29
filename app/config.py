@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 	REDIS_PASSWORD: str = ""
 	REDIS_KEY_PREFIX: str
 	CACHE_TTL_MEDIUM: int
+	LINES_TTL: int = 14400
 	FREE_KEY_PREFIX: str
 	PREMIUM_KEY_PREFIX: str
 
