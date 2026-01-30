@@ -569,7 +569,7 @@ async def delete_account(user: Annotated[dict, Depends(get_firebase_user_from_to
 @router.post("/create-portal-session")
 async def create_portal_session(
 	user: Annotated[dict, Depends(get_firebase_user_from_token)],
-	return_url: str = Body(None, alias="returnUrl")
+	return_url: Optional[str] = Body(None, alias="returnUrl", embed=True)
 ):
 	"""
 	Creates a Stripe Customer Portal session for the authenticated user
