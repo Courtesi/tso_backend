@@ -161,7 +161,7 @@ async def fetch_games_with_lines(
 
 		if markets:
 			# Filter: Only include games where all outcomes have at least 2 sportsbooks
-			min_sportsbooks = 2
+			min_sportsbooks = 3
 			all_outcomes_valid = True
 
 			for market in markets:
