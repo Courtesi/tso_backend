@@ -201,6 +201,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 break
 
             except Exception as e:
+                # Connection-related errors mean the socket is dead — break out
+                error_msg = str(e).lower()
+                if "not connected" in error_msg or "close" in error_msg or "accept" in error_msg:
+                    logger.info(f"Client connection lost: {connection_id}")
+                    break
+
                 logger.error(f"Error receiving message from {connection_id}: {e}")
                 await ws_manager.send_message(connection_id, {
                     "type": "error",

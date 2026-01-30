@@ -251,7 +251,9 @@ class WebSocketManager:
         try:
             await conn.websocket.send_json(message)
         except Exception as e:
-            logger.error(f"Failed to send message to {connection_id}: {e}")
+            logger.warning(f"Failed to send message to {connection_id}: {e}")
+            # Connection is dead — remove it so the Redis listener stops sending
+            self.active_connections.pop(connection_id, None)
 
     async def _send_initial_data(self, connection_id: str, stream: str, filters: dict, channel: str):
         """
