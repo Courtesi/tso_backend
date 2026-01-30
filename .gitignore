@@ -13,3 +13,6 @@ wheels/
 # Secrets
 **/.env
 *service-account*
+
+# Scripts
+/scripts/
