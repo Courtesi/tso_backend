@@ -136,7 +136,7 @@ class WebSocketManager:
 				self._redis_listener(connection_id, channel)
 			)
 
-		logger.info(f"Subscribed {connection_id} to {stream} (channel: {channel})")
+		logger.info(f"Subscribed {str(connection_id)[:5]} to {stream} (channel: {channel})")
 		await self._send_initial_data(connection_id, stream, filters, channel)
 
 	async def update_filters(self, connection_id: str, filters: dict):
@@ -173,7 +173,7 @@ class WebSocketManager:
 			logger.debug(f"Applying merged filters for {stream}: {merged_filters}")
 			await self._send_filtered_data(connection_id, stream, merged_filters, cache_key)
 
-		logger.info(f"Updated filters for {connection_id}: {filters}")
+		logger.info(f"Updated filters for {str(connection_id)[:5]}: {filters}")
 
 	async def unsubscribe(self, connection_id: str, stream: str):
 		"""
@@ -190,7 +190,7 @@ class WebSocketManager:
 
 		if stream in conn.subscriptions:
 			del conn.subscriptions[stream]
-			logger.info(f"Unsubscribed {connection_id} from {stream}")
+			logger.info(f"Unsubscribed {str(connection_id)[:5]} from {stream}")
 
 		# If no more subscriptions, clean up Redis connection
 		if not conn.subscriptions and conn.redis_pubsub:
@@ -359,7 +359,7 @@ class WebSocketManager:
 
 		try:
 			await pubsub.subscribe(channel)
-			logger.info(f"Redis listener started for {connection_id} on {channel}")
+			# logger.info(f"Redis listener started for {connection_id} on {channel}")
 
 			while connection_id in self.active_connections:
 				try:
@@ -430,7 +430,7 @@ class WebSocketManager:
 		finally:
 			await pubsub.unsubscribe(channel)
 			await pubsub.close()
-			logger.info(f"Redis listener stopped for {connection_id}")
+			# logger.info(f"Redis listener stopped for {connection_id}")
 
 
 ws_manager = WebSocketManager()
