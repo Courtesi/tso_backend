@@ -196,6 +196,10 @@ class WebSocketManager:
 		if not conn.subscriptions and conn.redis_pubsub:
 			if conn.pubsub_task:
 				conn.pubsub_task.cancel()
+				try:
+					await conn.pubsub_task
+				except asyncio.CancelledError:
+					pass
 			await conn.redis_pubsub.close()
 			conn.redis_pubsub = None
 
@@ -214,6 +218,10 @@ class WebSocketManager:
 		# Cancel pub/sub listener task
 		if conn.pubsub_task:
 			conn.pubsub_task.cancel()
+			try:
+				await conn.pubsub_task
+			except asyncio.CancelledError:
+				pass
 
 		# Close Redis connection
 		if conn.redis_pubsub:
