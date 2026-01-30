@@ -10,266 +10,266 @@ settings = get_settings()
 
 
 def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
-    """
-    Apply filters to arbitrage data.
+	"""
+	Apply filters to arbitrage data.
 
-    Args:
-        arbs: List of arbitrage opportunities
-        filters: Filter configuration dict with keys:
-            - sportsbooks: List of sportsbook names to include (optional)
-        tier: User tier ("free" or "premium")
+	Args:
+		arbs: List of arbitrage opportunities
+		filters: Filter configuration dict with keys:
+			- sportsbooks: List of sportsbook names to include (optional)
+		tier: User tier ("free" or "premium")
 
-    Returns:
-        Filtered list of arbitrage opportunities
-    """
-    filtered = arbs
+	Returns:
+		Filtered list of arbitrage opportunities
+	"""
+	filtered = arbs
 
-    max_arbs = settings.TIER_MAX_ARBS.get(tier)
-    if max_arbs:
-        filtered = filtered[:max_arbs]
+	max_arbs = settings.TIER_MAX_ARBS.get(tier)
+	if max_arbs:
+		filtered = filtered[:max_arbs]
 
-    min_profit = filters.get("min_profit")
-    if min_profit is not None:
-        try:
-            min_profit_val = float(min_profit)
-            if min_profit_val > 0:
-                filtered = [
-                    arb for arb in filtered
-                    if arb.get("profit_percentage", 0) >= min_profit_val
-                ]
-        except (ValueError, TypeError):
-            pass
+	min_profit = filters.get("min_profit")
+	if min_profit is not None:
+		try:
+			min_profit_val = float(min_profit)
+			if min_profit_val > 0:
+				filtered = [
+					arb for arb in filtered
+					if arb.get("profit_percentage", 0) >= min_profit_val
+				]
+		except (ValueError, TypeError):
+			pass
 
-    max_profit = filters.get("max_profit")
-    logger.debug(f"max_profit filter value: {max_profit} (type: {type(max_profit).__name__})")
-    if max_profit is not None:
-        try:
-            max_profit_val = float(max_profit)
-            before_count = len(filtered)
-            filtered = [
-                arb for arb in filtered
-                if arb.get("profit_percentage", 0) <= max_profit_val
-            ]
-            logger.debug(f"max_profit filter applied: {before_count} -> {len(filtered)} arbs (max: {max_profit_val}%)")
-        except (ValueError, TypeError) as e:
-            logger.warning(f"Failed to apply max_profit filter: {e}")
+	max_profit = filters.get("max_profit")
+	logger.debug(f"max_profit filter value: {max_profit} (type: {type(max_profit).__name__})")
+	if max_profit is not None:
+		try:
+			max_profit_val = float(max_profit)
+			before_count = len(filtered)
+			filtered = [
+				arb for arb in filtered
+				if arb.get("profit_percentage", 0) <= max_profit_val
+			]
+			logger.debug(f"max_profit filter applied: {before_count} -> {len(filtered)} arbs (max: {max_profit_val}%)")
+		except (ValueError, TypeError) as e:
+			logger.warning(f"Failed to apply max_profit filter: {e}")
 
-    league = filters.get("league")
-    if league:
-        if isinstance(league, str):
-            if league.lower() != "all":
-                filtered = [
-                    arb for arb in filtered
-                    if arb.get("league", "").upper() == league.upper()
-                ]
-        elif isinstance(league, list) and len(league) > 0:
-            league_set = set(specific_league.upper() for specific_league in league)
-            filtered = [
-                arb for arb in filtered
-                if arb.get("league", "").upper() in league_set
-            ]
+	league = filters.get("league")
+	if league:
+		if isinstance(league, str):
+			if league.lower() != "all":
+				filtered = [
+					arb for arb in filtered
+					if arb.get("league", "").upper() == league.upper()
+				]
+		elif isinstance(league, list) and len(league) > 0:
+			league_set = set(specific_league.upper() for specific_league in league)
+			filtered = [
+				arb for arb in filtered
+				if arb.get("league", "").upper() in league_set
+			]
 
-    market_type = filters.get("market_type")
-    if market_type:
-        if isinstance(market_type, str):
-            market_types = [market_type.lower()]
-        elif isinstance(market_type, list) and len(market_type) > 0:
-            market_types = [m.lower() for m in market_type]
-        else:
-            market_types = None
+	market_type = filters.get("market_type")
+	if market_type:
+		if isinstance(market_type, str):
+			market_types = [market_type.lower()]
+		elif isinstance(market_type, list) and len(market_type) > 0:
+			market_types = [m.lower() for m in market_type]
+		else:
+			market_types = None
 
-        if market_types:
-            filtered = [
-                arb for arb in filtered
-                if arb.get("market", "").lower() in market_types
-            ]
+		if market_types:
+			filtered = [
+				arb for arb in filtered
+				if arb.get("market", "").lower() in market_types
+			]
 
-    sportsbooks_filter = filters.get("sportsbooks")
-    if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
-        sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
-        filtered = [
-            arb for arb in filtered
-            if arb.get("bet1", {}).get("sportsbook", "").lower() in sportsbooks_set
-            or arb.get("bet2", {}).get("sportsbook", "").lower() in sportsbooks_set
-        ]
+	sportsbooks_filter = filters.get("sportsbooks")
+	if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
+		sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
+		filtered = [
+			arb for arb in filtered
+			if arb.get("bet1", {}).get("sportsbook", "").lower() in sportsbooks_set
+			or arb.get("bet2", {}).get("sportsbook", "").lower() in sportsbooks_set
+		]
 
-    return filtered
+	return filtered
 
 
 def apply_terminal_filters(games: List[dict], filters: dict, tier: str) -> List[dict]:
-    """
-    Apply filters to terminal/charts data.
+	"""
+	Apply filters to terminal/charts data.
 
-    Args:
-        games: List of game data
-        filters: Filter configuration dict with keys:
-            - league: League filter ("NBA", "NFL", etc. or None for all)
-            - game_time: Game status filter ("upcoming", "live", or None)
-            - sportsbooks: List of sportsbook names to include (optional)
-        tier: User tier ("free" or "premium")
+	Args:
+		games: List of game data
+		filters: Filter configuration dict with keys:
+			- league: League filter ("NBA", "NFL", etc. or None for all)
+			- game_time: Game status filter ("upcoming", "live", or None)
+			- sportsbooks: List of sportsbook names to include (optional)
+		tier: User tier ("free" or "premium")
 
-    Returns:
-        Filtered list of games
-    """
-    filtered = games
+	Returns:
+		Filtered list of games
+	"""
+	filtered = games
 
-    allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
-    if allowed_leagues:
-        allowed_set = set(league.upper() for league in allowed_leagues)
-        filtered = [g for g in filtered if g.get("league", "").upper() in allowed_set]
+	allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
+	if allowed_leagues:
+		allowed_set = set(league.upper() for league in allowed_leagues)
+		filtered = [g for g in filtered if g.get("league", "").upper() in allowed_set]
 
-    league = filters.get("league")
-    if league:
-        if isinstance(league, str):
-            if league.lower() != "all":
-                filtered = [g for g in filtered if g.get("league", "").upper() == league.upper()]
-        elif isinstance(league, list) and len(league) > 0:
-            league_set = set(specific_league.upper() for specific_league in league)
-            filtered = [g for g in filtered if g.get("league", "").upper() in league_set]
+	league = filters.get("league")
+	if league:
+		if isinstance(league, str):
+			if league.lower() != "all":
+				filtered = [g for g in filtered if g.get("league", "").upper() == league.upper()]
+		elif isinstance(league, list) and len(league) > 0:
+			league_set = set(specific_league.upper() for specific_league in league)
+			filtered = [g for g in filtered if g.get("league", "").upper() in league_set]
 
-    game_time = filters.get("game_time")
-    if game_time:
-        filtered = filter_terminal_data(filtered, game_time=game_time)
+	game_time = filters.get("game_time")
+	if game_time:
+		filtered = filter_terminal_data(filtered, game_time=game_time)
 
-    max_games = settings.TIER_MAX_GAMES.get(tier)
-    if max_games:
-        filtered = filtered[:max_games]
+	max_games = settings.TIER_MAX_GAMES.get(tier)
+	if max_games:
+		filtered = filtered[:max_games]
 
-    sportsbooks_filter = filters.get("sportsbooks")
-    if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
-        sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
-        filtered = apply_sportsbook_filter_to_games(filtered, sportsbooks_set)
+	sportsbooks_filter = filters.get("sportsbooks")
+	if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
+		sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
+		filtered = apply_sportsbook_filter_to_games(filtered, sportsbooks_set)
 
-    return filtered
+	return filtered
 
 
 def apply_ev_filters(ev_bets: List[dict], filters: dict, tier: str) -> List[dict]:
-    """
-    Apply filters to EV betting data.
+	"""
+	Apply filters to EV betting data.
 
-    Args:
-        ev_bets: List of EV betting opportunities
-        filters: Filter configuration dict with keys:
-            - min_ev: Minimum EV percentage (optional)
-            - confidence: List of confidence levels to include (optional)
-            - league: League filter (optional)
-            - sportsbooks: List of sportsbook names to include (optional)
-        tier: User tier ("free" or "premium")
+	Args:
+		ev_bets: List of EV betting opportunities
+		filters: Filter configuration dict with keys:
+			- min_ev: Minimum EV percentage (optional)
+			- confidence: List of confidence levels to include (optional)
+			- league: League filter (optional)
+			- sportsbooks: List of sportsbook names to include (optional)
+		tier: User tier ("free" or "premium")
 
-    Returns:
-        Filtered list of EV betting opportunities
-    """
-    filtered = ev_bets
+	Returns:
+		Filtered list of EV betting opportunities
+	"""
+	filtered = ev_bets
 
-    allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
-    if allowed_leagues:
-        allowed_set = set(league.upper() for league in allowed_leagues)
-        filtered = [ev for ev in filtered if ev.get("league", "").upper() in allowed_set]
+	allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
+	if allowed_leagues:
+		allowed_set = set(league.upper() for league in allowed_leagues)
+		filtered = [ev for ev in filtered if ev.get("league", "").upper() in allowed_set]
 
-    max_evs = settings.TIER_MAX_EVS.get(tier)
-    if max_evs:
-        filtered = filtered[:max_evs]
+	max_evs = settings.TIER_MAX_EVS.get(tier)
+	if max_evs:
+		filtered = filtered[:max_evs]
 
-    min_ev = filters.get("min_ev")
-    if min_ev is not None:
-        try:
-            min_ev_val = float(min_ev)
-            if min_ev_val > 0:
-                filtered = [
-                    ev for ev in filtered
-                    if ev.get("expected_value", 0) >= min_ev_val
-                ]
-        except (ValueError, TypeError):
-            pass
+	min_ev = filters.get("min_ev")
+	if min_ev is not None:
+		try:
+			min_ev_val = float(min_ev)
+			if min_ev_val > 0:
+				filtered = [
+					ev for ev in filtered
+					if ev.get("expected_value", 0) >= min_ev_val
+				]
+		except (ValueError, TypeError):
+			pass
 
-    conf_filters = filters.get("confidence")
-    if conf_filters and isinstance(conf_filters, list) and len(conf_filters) > 0:
-        confidence_set = set(conf_filter.upper() for conf_filter in conf_filters)
-        filtered = [
-            ev for ev in filtered
-            if ev.get("confidence", "").upper() in confidence_set
-        ]
+	conf_filters = filters.get("confidence")
+	if conf_filters and isinstance(conf_filters, list) and len(conf_filters) > 0:
+		confidence_set = set(conf_filter.upper() for conf_filter in conf_filters)
+		filtered = [
+			ev for ev in filtered
+			if ev.get("confidence", "").upper() in confidence_set
+		]
 
-    league = filters.get("league")
-    if league:
-        if isinstance(league, str):
-            if league.lower() != "all":
-                filtered = [
-                    ev for ev in filtered
-                    if ev.get("league", "").upper() == league.upper()
-                ]
-        elif isinstance(league, list) and len(league) > 0:
-            league_set = set(specific_league.upper() for specific_league in league)
-            filtered = [
-                ev for ev in filtered
-                if ev.get("league", "").upper() in league_set
-            ]
+	league = filters.get("league")
+	if league:
+		if isinstance(league, str):
+			if league.lower() != "all":
+				filtered = [
+					ev for ev in filtered
+					if ev.get("league", "").upper() == league.upper()
+				]
+		elif isinstance(league, list) and len(league) > 0:
+			league_set = set(specific_league.upper() for specific_league in league)
+			filtered = [
+				ev for ev in filtered
+				if ev.get("league", "").upper() in league_set
+			]
 
-    sportsbooks_filter = filters.get("sportsbooks")
-    if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
-        sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
-        filtered = [
-            ev for ev in filtered
-            if ev.get("bet", {}).get("sportsbook", "").lower() in sportsbooks_set
-        ]
+	sportsbooks_filter = filters.get("sportsbooks")
+	if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
+		sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
+		filtered = [
+			ev for ev in filtered
+			if ev.get("bet", {}).get("sportsbook", "").lower() in sportsbooks_set
+		]
 
-    return filtered
+	return filtered
 
 
 def apply_sportsbook_filter_to_games(games: List[dict], sportsbooks: Set[str]) -> List[dict]:
-    """
-    Filter line history by selected sportsbooks.
+	"""
+	Filter line history by selected sportsbooks.
 
-    This function filters the line movement history within each game's markets
-    to only include data from the specified sportsbooks. It also recalculates
-    the best odds based on the filtered data.
+	This function filters the line movement history within each game's markets
+	to only include data from the specified sportsbooks. It also recalculates
+	the best odds based on the filtered data.
 
-    Args:
-        games: List of game dictionaries with market and outcome data
-        sportsbooks: Set of sportsbook names (lowercased) to include
+	Args:
+		games: List of game dictionaries with market and outcome data
+		sportsbooks: Set of sportsbook names (lowercased) to include
 
-    Returns:
-        Filtered list of games (only games with data from selected sportsbooks)
-    """
-    filtered_games = []
+	Returns:
+		Filtered list of games (only games with data from selected sportsbooks)
+	"""
+	filtered_games = []
 
-    for game in games:
-        filtered_game = game.copy()
-        filtered_markets = []
+	for game in games:
+		filtered_game = game.copy()
+		filtered_markets = []
 
-        markets = game.get("markets", [])
-        for market in markets:
-            filtered_outcomes = []
+		markets = game.get("markets", [])
+		for market in markets:
+			filtered_outcomes = []
 
-            outcomes = market.get("outcomes", [])
-            for outcome in outcomes:
-                history = outcome.get("history", [])
-                filtered_history = [
-                    point for point in history
-                    if point.get("sportsbook", "").lower() in sportsbooks
-                ]
+			outcomes = market.get("outcomes", [])
+			for outcome in outcomes:
+				history = outcome.get("history", [])
+				filtered_history = [
+					point for point in history
+					if point.get("sportsbook", "").lower() in sportsbooks
+				]
 
-                if filtered_history:  # Only include outcome if it has data
-                    filtered_outcome = outcome.copy()
-                    filtered_outcome["history"] = filtered_history
+				if filtered_history:  # Only include outcome if it has data
+					filtered_outcome = outcome.copy()
+					filtered_outcome["history"] = filtered_history
 
-                    # Recalculate best odds from filtered history
-                    latest = max(filtered_history, key=lambda x: x.get("timestamp", 0))
-                    filtered_outcome["current_best_odds"] = latest.get("odds")
-                    filtered_outcome["current_best_sportsbook"] = latest.get("sportsbook")
+					# Recalculate best odds from filtered history
+					latest = max(filtered_history, key=lambda x: x.get("timestamp", 0))
+					filtered_outcome["current_best_odds"] = latest.get("odds")
+					filtered_outcome["current_best_sportsbook"] = latest.get("sportsbook")
 
-                    filtered_outcomes.append(filtered_outcome)
+					filtered_outcomes.append(filtered_outcome)
 
-            if filtered_outcomes:  # Only include market if it has outcomes
-                filtered_market = market.copy()
-                filtered_market["outcomes"] = filtered_outcomes
-                filtered_markets.append(filtered_market)
+			if filtered_outcomes:  # Only include market if it has outcomes
+				filtered_market = market.copy()
+				filtered_market["outcomes"] = filtered_outcomes
+				filtered_markets.append(filtered_market)
 
-        if filtered_markets:  # Only include game if it has markets
-            filtered_game["markets"] = filtered_markets
-            filtered_games.append(filtered_game)
+		if filtered_markets:  # Only include game if it has markets
+			filtered_game["markets"] = filtered_markets
+			filtered_games.append(filtered_game)
 
-    return filtered_games
+	return filtered_games
 
 def filter_terminal_data(games: List[Dict], game_time: Optional[str] = None) -> List[Dict]:
 	"""

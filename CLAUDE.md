@@ -29,7 +29,6 @@ app/
   models.py               # Pydantic models
   filter_utils.py         # Arb/terminal/EV data filtering
   terminal_utils.py       # Terminal stream utilities
-  ev_utils.py             # Expected value utilities
   dependencies/
     authentication.py     # FastAPI dependency for auth
 ```
