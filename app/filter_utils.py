@@ -1,10 +1,9 @@
 """Utility functions for filtering arbitrage and terminal data."""
 
 import logging
-from typing import List, Set
+from typing import List, Set, Dict, Optional
 
 from app.config import get_settings
-from app import terminal_utils
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -25,12 +24,10 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
     """
     filtered = arbs
 
-    # Apply tier limits first
     max_arbs = settings.TIER_MAX_ARBS.get(tier)
     if max_arbs:
         filtered = filtered[:max_arbs]
 
-    # Apply minimum profit filter
     min_profit = filters.get("min_profit")
     if min_profit is not None:
         try:
@@ -43,7 +40,6 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
         except (ValueError, TypeError):
             pass
 
-    # Apply maximum profit filter
     max_profit = filters.get("max_profit")
     logger.debug(f"max_profit filter value: {max_profit} (type: {type(max_profit).__name__})")
     if max_profit is not None:
@@ -58,7 +54,6 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
         except (ValueError, TypeError) as e:
             logger.warning(f"Failed to apply max_profit filter: {e}")
 
-    # Apply league filter (supports single string or list of leagues)
     league = filters.get("league")
     if league:
         if isinstance(league, str):
@@ -74,7 +69,6 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
                 if arb.get("league", "").upper() in league_set
             ]
 
-    # Apply market type filter
     market_type = filters.get("market_type")
     if market_type:
         if isinstance(market_type, str):
@@ -90,7 +84,6 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
                 if arb.get("market", "").lower() in market_types
             ]
 
-    # Apply sportsbook filter
     sportsbooks_filter = filters.get("sportsbooks")
     if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
         sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
@@ -120,14 +113,11 @@ def apply_terminal_filters(games: List[dict], filters: dict, tier: str) -> List[
     """
     filtered = games
 
-    # Apply tier-based league restrictions first (before user's league filter)
     allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
     if allowed_leagues:
         allowed_set = set(league.upper() for league in allowed_leagues)
         filtered = [g for g in filtered if g.get("league", "").upper() in allowed_set]
 
-    # User's league filter (further narrows down if specified)
-    # Supports single string or list of leagues
     league = filters.get("league")
     if league:
         if isinstance(league, str):
@@ -137,17 +127,14 @@ def apply_terminal_filters(games: List[dict], filters: dict, tier: str) -> List[
             league_set = set(specific_league.upper() for specific_league in league)
             filtered = [g for g in filtered if g.get("league", "").upper() in league_set]
 
-    # Game time filter
     game_time = filters.get("game_time")
     if game_time:
-        filtered = terminal_utils.filter_terminal_data(filtered, game_time=game_time)
+        filtered = filter_terminal_data(filtered, game_time=game_time)
 
-    # Apply tier limits
     max_games = settings.TIER_MAX_GAMES.get(tier)
     if max_games:
         filtered = filtered[:max_games]
 
-    # Sportsbook filter (filter outcomes within each game)
     sportsbooks_filter = filters.get("sportsbooks")
     if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
         sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
@@ -174,18 +161,15 @@ def apply_ev_filters(ev_bets: List[dict], filters: dict, tier: str) -> List[dict
     """
     filtered = ev_bets
 
-    # Apply tier-based league restrictions first
     allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
     if allowed_leagues:
         allowed_set = set(league.upper() for league in allowed_leagues)
         filtered = [ev for ev in filtered if ev.get("league", "").upper() in allowed_set]
 
-    # Apply tier limits
     max_evs = settings.TIER_MAX_EVS.get(tier)
     if max_evs:
         filtered = filtered[:max_evs]
 
-    # Apply minimum EV filter
     min_ev = filters.get("min_ev")
     if min_ev is not None:
         try:
@@ -198,16 +182,14 @@ def apply_ev_filters(ev_bets: List[dict], filters: dict, tier: str) -> List[dict
         except (ValueError, TypeError):
             pass
 
-    # Apply confidence filter
-    confidence_filter = filters.get("confidence")
-    if confidence_filter and isinstance(confidence_filter, list) and len(confidence_filter) > 0:
-        confidence_set = set(c.upper() for c in confidence_filter)
+    conf_filters = filters.get("confidence")
+    if conf_filters and isinstance(conf_filters, list) and len(conf_filters) > 0:
+        confidence_set = set(conf_filter.upper() for conf_filter in conf_filters)
         filtered = [
             ev for ev in filtered
             if ev.get("confidence", "").upper() in confidence_set
         ]
 
-    # Apply league filter (supports single string or list of leagues)
     league = filters.get("league")
     if league:
         if isinstance(league, str):
@@ -223,7 +205,6 @@ def apply_ev_filters(ev_bets: List[dict], filters: dict, tier: str) -> List[dict
                 if ev.get("league", "").upper() in league_set
             ]
 
-    # Apply sportsbook filter (excludes Kalshi/Polymarket since they're prediction markets)
     sportsbooks_filter = filters.get("sportsbooks")
     if sportsbooks_filter and isinstance(sportsbooks_filter, list) and len(sportsbooks_filter) > 0:
         sportsbooks_set = set(sb.lower() for sb in sportsbooks_filter)
@@ -262,7 +243,6 @@ def apply_sportsbook_filter_to_games(games: List[dict], sportsbooks: Set[str]) -
 
             outcomes = market.get("outcomes", [])
             for outcome in outcomes:
-                # Filter history to only include selected sportsbooks
                 history = outcome.get("history", [])
                 filtered_history = [
                     point for point in history
@@ -290,3 +270,19 @@ def apply_sportsbook_filter_to_games(games: List[dict], sportsbooks: Set[str]) -
             filtered_games.append(filtered_game)
 
     return filtered_games
+
+def filter_terminal_data(games: List[Dict], game_time: Optional[str] = None) -> List[Dict]:
+	"""
+	Apply game_time filter to cached terminal data.
+
+	Args:
+		games: List of game dictionaries
+		game_time: Filter by game status ("upcoming", "live", or None for all)
+
+	Returns:
+		Filtered list of games
+	"""
+	if not game_time or game_time == "all":
+		return games
+
+	return [g for g in games if g.get("game_status") == game_time]

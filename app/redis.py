@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 class RedisClient:
-	"""Async Redis client for caching"""
 
 	def __init__(self):
 		self.redis: Optional[redis.Redis] = None
