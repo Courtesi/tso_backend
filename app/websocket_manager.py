@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, Optional
+from typing import Dict
 from dataclasses import dataclass, field
 
 from fastapi import WebSocket
@@ -20,6 +20,16 @@ settings = get_settings()
 
 
 @dataclass
+class SubscriptionState:
+	"""Tracks state for a single stream subscription."""
+
+	channel: str
+	filters: Dict
+	redis_conn: redis.Redis
+	listener_task: asyncio.Task
+
+
+@dataclass
 class ConnectionState:
 	"""Tracks state for a single WebSocket connection."""
 
@@ -27,10 +37,8 @@ class ConnectionState:
 	user_id: str = ""
 	tier: str = "free"
 	authenticated: bool = False
-	subscriptions: Dict[str, Dict] = field(default_factory=dict)  # stream_name -> filters
+	subscriptions: Dict[str, SubscriptionState] = field(default_factory=dict)  # stream_name -> SubscriptionState
 	last_ping: float = field(default_factory=time.time)
-	redis_pubsub: Optional[redis.Redis] = None
-	pubsub_task: Optional[asyncio.Task] = None
 
 
 class WebSocketManager:
@@ -107,9 +115,6 @@ class WebSocketManager:
 		if not conn.authenticated:
 			raise ValueError("Connection not authenticated")
 
-		# Store subscription with filters (copy to prevent reference issues)
-		conn.subscriptions[stream] = dict(filters)
-
 		if stream == "arbs":
 			cache_key = settings.PREMIUM_KEY_PREFIX if conn.tier == "premium" else settings.FREE_KEY_PREFIX
 			channel = f"{settings.REDIS_KEY_PREFIX}{cache_key}:updates"
@@ -123,55 +128,81 @@ class WebSocketManager:
 		else:
 			raise ValueError(f"Unknown stream: {stream}")
 
-		if not conn.redis_pubsub:
-			conn.redis_pubsub = redis.Redis(
-				host=settings.REDIS_HOST,
-				port=settings.REDIS_PORT,
-				db=settings.REDIS_DB,
-				password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
-				decode_responses=True
-			)
+		# Tear down existing subscription for this stream if re-subscribing
+		if stream in conn.subscriptions:
+			old = conn.subscriptions[stream]
+			old.listener_task.cancel()
+			try:
+				await old.listener_task
+			except asyncio.CancelledError:
+				pass
+			await old.redis_conn.close()
+			del conn.subscriptions[stream]
 
-			conn.pubsub_task = asyncio.create_task(
-				self._redis_listener(connection_id, channel)
-			)
+		# Create a dedicated Redis connection and listener for this stream
+		redis_conn = redis.Redis(
+			host=settings.REDIS_HOST,
+			port=settings.REDIS_PORT,
+			db=settings.REDIS_DB,
+			password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+			decode_responses=True
+		)
+
+		listener_task = asyncio.create_task(
+			self._redis_listener(connection_id, stream, channel, redis_conn)
+		)
+
+		conn.subscriptions[stream] = SubscriptionState(
+			channel=channel,
+			filters=dict(filters),
+			redis_conn=redis_conn,
+			listener_task=listener_task,
+		)
 
 		logger.info(f"Subscribed {str(connection_id)[:5]} to {stream} (channel: {channel})")
 		await self._send_initial_data(connection_id, stream, filters, channel)
 
-	async def update_filters(self, connection_id: str, filters: dict):
+	async def update_filters(self, connection_id: str, filters: dict, stream: str = None):
 		"""
-		Update filters for an existing subscription without reconnecting.
-		NOW SENDS RE-FILTERED DATA IMMEDIATELY.
+		Update filters for a specific subscription without reconnecting.
+		Sends re-filtered data immediately.
 
 		Args:
 			connection_id: Unique connection identifier
 			filters: New filter configuration dict
+			stream: Target stream name (if None, updates all subscriptions for backwards compat)
 		"""
 		if connection_id not in self.active_connections:
 			raise ValueError("Connection not found")
 
 		conn = self.active_connections[connection_id]
 
-		# Update filters for all active subscriptions
-		for stream in conn.subscriptions:
-			# Merge new filters with existing subscription filters
-			conn.subscriptions[stream].update(filters)
-			merged_filters = conn.subscriptions[stream]
+		# Determine which streams to update
+		if stream:
+			# Explicit stream requested — only update if it's actually subscribed
+			streams_to_update = [stream] if stream in conn.subscriptions else []
+		else:
+			# No stream specified — update all (backwards compat)
+			streams_to_update = list(conn.subscriptions.keys())
 
-			if stream == "arbs":
+		for s in streams_to_update:
+			# Merge new filters with existing subscription filters
+			conn.subscriptions[s].filters.update(filters)
+			merged_filters = conn.subscriptions[s].filters
+
+			if s == "arbs":
 				cache_key = settings.PREMIUM_KEY_PREFIX if conn.tier == "premium" else settings.FREE_KEY_PREFIX
 				cache_key = f"{settings.REDIS_KEY_PREFIX}{cache_key}"
-			elif stream == "terminal":
+			elif s == "terminal":
 				# ALWAYS fetch from "all" cache and apply league filter (ensures consistency with pubsub)
 				cache_key = f"{settings.REDIS_KEY_PREFIX}terminal:all"
-			elif stream == "ev":
+			elif s == "ev":
 				cache_key = f"{settings.REDIS_KEY_PREFIX}ev:{conn.tier}"
 			else:
 				continue
 
-			logger.debug(f"Applying merged filters for {stream}: {merged_filters}")
-			await self._send_filtered_data(connection_id, stream, merged_filters, cache_key)
+			logger.debug(f"Applying merged filters for {s}: {merged_filters}")
+			await self._send_filtered_data(connection_id, s, merged_filters, cache_key)
 
 		logger.info(f"Updated filters for {str(connection_id)[:5]}: {filters}")
 
@@ -189,19 +220,14 @@ class WebSocketManager:
 		conn = self.active_connections[connection_id]
 
 		if stream in conn.subscriptions:
-			del conn.subscriptions[stream]
+			sub = conn.subscriptions.pop(stream)
+			sub.listener_task.cancel()
+			try:
+				await sub.listener_task
+			except asyncio.CancelledError:
+				pass
+			await sub.redis_conn.close()
 			logger.info(f"Unsubscribed {str(connection_id)[:5]} from {stream}")
-
-		# If no more subscriptions, clean up Redis connection
-		if not conn.subscriptions and conn.redis_pubsub:
-			if conn.pubsub_task:
-				conn.pubsub_task.cancel()
-				try:
-					await conn.pubsub_task
-				except asyncio.CancelledError:
-					pass
-			await conn.redis_pubsub.close()
-			conn.redis_pubsub = None
 
 	async def disconnect(self, connection_id: str):
 		"""
@@ -215,17 +241,15 @@ class WebSocketManager:
 
 		conn = self.active_connections[connection_id]
 
-		# Cancel pub/sub listener task
-		if conn.pubsub_task:
-			conn.pubsub_task.cancel()
+		# Tear down all per-stream subscriptions
+		for sub in conn.subscriptions.values():
+			sub.listener_task.cancel()
 			try:
-				await conn.pubsub_task
+				await sub.listener_task
 			except asyncio.CancelledError:
 				pass
-
-		# Close Redis connection
-		if conn.redis_pubsub:
-			await conn.redis_pubsub.close()
+			await sub.redis_conn.close()
+		conn.subscriptions.clear()
 
 		# Remove from active connections
 		del self.active_connections[connection_id]
@@ -248,8 +272,9 @@ class WebSocketManager:
 		try:
 			await conn.websocket.send_json(message)
 		except Exception as e:
-			logger.warning(f"Failed to send message to {connection_id}: {e}")
-			self.active_connections.pop(connection_id, None)
+			logger.error(f"Failed to send message to {connection_id} (type={message.get('type')}): {e}")
+			# Don't silently remove — let the message loop detect the disconnect naturally.
+			# Removing here causes the listener task to exit and desync state.
 
 	async def _send_initial_data(self, connection_id: str, stream: str, filters: dict, channel: str):
 		"""
@@ -311,6 +336,7 @@ class WebSocketManager:
 						"message": "No data available yet"
 					}
 				})
+				return
 
 			cached_data = json.loads(cached_data_raw)
 
@@ -351,23 +377,24 @@ class WebSocketManager:
 		except Exception as e:
 			logger.error(f"Failed to send filtered data to {connection_id}: {e}")
 
-	async def _redis_listener(self, connection_id: str, channel: str):
+	async def _redis_listener(self, connection_id: str, stream: str, channel: str, redis_conn: redis.Redis):
 		"""
 		Listen for Redis pub/sub messages and forward to WebSocket.
 
 		Args:
 			connection_id: Unique connection identifier
+			stream: Stream name this listener is for
 			channel: Redis channel to subscribe to
+			redis_conn: Dedicated Redis connection for this listener
 		"""
 		conn = self.active_connections.get(connection_id)
-		if not conn or not conn.redis_pubsub:
+		if not conn:
 			return
 
-		pubsub = conn.redis_pubsub.pubsub()
+		pubsub = redis_conn.pubsub()
 
 		try:
 			await pubsub.subscribe(channel)
-			# logger.info(f"Redis listener started for {connection_id} on {channel}")
 
 			while connection_id in self.active_connections:
 				try:
@@ -379,14 +406,7 @@ class WebSocketManager:
 					if message and message.get("type", "") == "message":
 						cache_data = json.loads(message["data"])
 
-						if "arbs" in channel:
-							stream = "arbs"
-						elif "ev:" in channel:
-							stream = "ev"
-						else:
-							stream = "terminal"
-
-						filters = conn.subscriptions.get(stream, {})
+						filters = conn.subscriptions[stream].filters if stream in conn.subscriptions else {}
 
 						if stream == "arbs":
 							filtered_data = filter_utils.apply_arb_filters(
@@ -438,7 +458,6 @@ class WebSocketManager:
 		finally:
 			await pubsub.unsubscribe(channel)
 			await pubsub.close()
-			# logger.info(f"Redis listener stopped for {connection_id}")
 
 
 ws_manager = WebSocketManager()

@@ -54,12 +54,14 @@ async def handle_message(connection_id: str, message: Dict):
 
 		elif message_type == "update_filters":
 			# Update filters without reconnecting
+			stream = message.get("stream")
 			filters = message.get("filters", {})
 
 			try:
-				await ws_manager.update_filters(connection_id, filters)
+				await ws_manager.update_filters(connection_id, filters, stream)
 				await ws_manager.send_message(connection_id, {
 					"type": "filters_updated",
+					"stream": stream,
 					"filters": filters
 				})
 			except ValueError as e:
