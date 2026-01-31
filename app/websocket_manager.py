@@ -272,9 +272,12 @@ class WebSocketManager:
 		try:
 			await conn.websocket.send_json(message)
 		except Exception as e:
-			logger.error(f"Failed to send message to {connection_id} (type={message.get('type')}): {e}")
-			# Don't silently remove — let the message loop detect the disconnect naturally.
-			# Removing here causes the listener task to exit and desync state.
+			error_msg = str(e).lower()
+			if "close" in error_msg or "not connected" in error_msg:
+				logger.warning(f"Connection {connection_id} is dead, cleaning up: {e}")
+				await self.disconnect(connection_id)
+			else:
+				logger.error(f"Failed to send message to {connection_id} (type={message.get('type')}): {e}")
 
 	async def _send_initial_data(self, connection_id: str, stream: str, filters: dict, channel: str):
 		"""

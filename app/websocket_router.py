@@ -173,9 +173,20 @@ async def websocket_endpoint(websocket: WebSocket):
 			return
 
 		# --- Main message loop ---
+		# 90s timeout = 3× the client ping interval (30s).
+		# If no message arrives within this window the client is presumed dead
+		# (e.g. mobile browser backgrounded without sending a close frame).
+		RECEIVE_TIMEOUT = 90
+
 		while True:
 			try:
-				message = await websocket.receive_json()
+				message = await asyncio.wait_for(
+					websocket.receive_json(),
+					timeout=RECEIVE_TIMEOUT
+				)
+			except asyncio.TimeoutError:
+				logger.info(f"Client {connection_id} timed out (no message in {RECEIVE_TIMEOUT}s)")
+				break
 			except WebSocketDisconnect:
 				logger.info(f"Client disconnected: {connection_id}")
 				break
