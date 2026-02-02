@@ -41,6 +41,12 @@ app/
 - `WebSocketManager` is a global singleton (`ws_manager`). Each connection gets a `ConnectionState` with its own Redis pubsub client and background listener task.
 - REST routes and WS routes are both mounted under `/api`.
 
+
+## Coding Style
+Prefer guard statements over nested ifs.
+Try and write self-documenting code instead of constantly commenting redudant things.
+Stop randomly commenting code that could be easily described just by reading it.
+
 ## Linting
 
 ```bash

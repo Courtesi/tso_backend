@@ -21,6 +21,7 @@ class BetSide(BaseModel):
 	odds: float
 	sportsbook: str
 	stake: float  # Amount to bet (out of $100 total)
+	link: str | None
 
 	class Config:
 		json_schema_extra = {
@@ -28,7 +29,8 @@ class BetSide(BaseModel):
 				"team": "Lakers",
 				"odds": 2.10,
 				"sportsbook": "DraftKings",
-				"stake": 47.62
+				"stake": 47.62,
+				"link": "https://link-to-bet.com"
 			}
 		}
 
