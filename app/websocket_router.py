@@ -184,6 +184,7 @@ async def websocket_endpoint(websocket: WebSocket):
 					websocket.receive_json(),
 					timeout=RECEIVE_TIMEOUT
 				)
+				logger.info("Received message: %s", str(message)[:20])
 			except asyncio.TimeoutError:
 				logger.info(f"Client {connection_id} timed out (no message in {RECEIVE_TIMEOUT}s)")
 				break
