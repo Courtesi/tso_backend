@@ -50,7 +50,7 @@ async def handle_message(connection_id: str, message: Dict):
 					"stream": stream,
 					"filters": filters
 				})
-				logger.info(f"Subscribed {str(connection_id)[:5]} to {stream}")
+				# logger.info(f"Subscribed {str(connection_id)[:5]} to {stream}")
 			except ValueError as e:
 				await ws_manager.send_message(connection_id, {
 					"type": "error",
@@ -71,7 +71,7 @@ async def handle_message(connection_id: str, message: Dict):
 					"stream": stream,
 					"filters": filters
 				})
-				logger.info(f"Updated filters for {connection_id[:5]}")
+				# logger.info(f"Updated filters for {connection_id[:5]}")
 			except ValueError as e:
 				await ws_manager.send_message(connection_id, {
 					"type": "error",
@@ -97,7 +97,7 @@ async def handle_message(connection_id: str, message: Dict):
 				"type": "unsubscribed",
 				"stream": stream
 			})
-			logger.info(f"Unsubscribed {str(connection_id)[:5]} from {stream}")
+			# logger.info(f"Unsubscribed {str(connection_id)[:5]} from {stream}")
 
 		elif message_type == "ping":
 			# Respond to ping with pong
@@ -141,13 +141,13 @@ async def websocket_endpoint(websocket: WebSocket):
 	try:
 		# --- Authentication phase ---
 		try:
-			start_time = time.time()
+			initial_st = time.time()
 			auth_message = await asyncio.wait_for(
 				websocket.receive_json(),
 				timeout=10.0
 			)
-			elapsed_time = time.time() - start_time
-			logger.info(f"trying to receive auth message, received in {elapsed_time} seconds")
+			initial_et = round(time.time() - initial_st, 2)
+			logger.info(f"trying to receive auth message, received in {initial_et} seconds")
 		except asyncio.TimeoutError:
 			logger.warning(f"Authentication timeout for {connection_id}")
 			await websocket.close(code=1008)
@@ -175,14 +175,14 @@ async def websocket_endpoint(websocket: WebSocket):
 			return
 
 		try:
-			start_time = time.time()
+			auth_st = time.time()
 			user = await ws_manager.authenticate(connection_id, token)
 			await ws_manager.send_message(connection_id, {
 				"type": "auth_success",
 				"user": user
 			})
-			elapsed_time = time.time() - start_time
-			logger.info(f"authenticated in {elapsed_time} seconds")
+			auth_et = round(time.time() - auth_st, 2)
+			logger.info(f"authenticated in {auth_et} seconds")
 		except ValueError as e:
 			await ws_manager.send_message(connection_id, {
 				"type": "auth_error",
@@ -200,13 +200,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
 		while True:
 			try:
-				start_time = time.time()
+				while_st = time.time()
 				message = await asyncio.wait_for(
 					websocket.receive_json(),
 					timeout=RECEIVE_TIMEOUT
 				)
-				elapsed_time = time.time() - start_time
-				logger.info(f"Received message ({elapsed_time}s): {str(message)[:40]}...")
+				while_et = round(time.time() - while_st, 2)
+				logger.info(f"Received message ({while_et}s): {str(message)[:100]}...")
 			except asyncio.TimeoutError:
 				logger.info(f"Client {connection_id} timed out (no message in {RECEIVE_TIMEOUT}s)")
 				break
@@ -227,10 +227,10 @@ async def websocket_endpoint(websocket: WebSocket):
 				})
 				continue
 
-			start_time = time.time()
+			handle_st = time.time()
 			await handle_message(connection_id, message)
-			elapsed_time = time.time() - start_time
-			logger.info(f"Handled message in {elapsed_time} seconds")
+			handle_et = round(time.time() - handle_st, 2)
+			logger.info(f"Handled message in {handle_et} seconds")
 
 	except WebSocketDisconnect:
 		logger.info(f"Client disconnected during setup: {connection_id}")
