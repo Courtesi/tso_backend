@@ -50,16 +50,30 @@ class WebSocketManager:
 		self.pong_timeout = getattr(settings, 'WEBSOCKET_PONG_TIMEOUT', 10)
 
 	async def connect(self, websocket: WebSocket, connection_id: str):
-		"""
-		Accept a new WebSocket connection.
-
-		Args:
-			websocket: FastAPI WebSocket instance
-			connection_id: Unique connection identifier
-		"""
 		await websocket.accept()
 		self.active_connections[connection_id] = ConnectionState(websocket=websocket)
 		logger.info(f"WebSocket connected: {connection_id}")
+
+	async def disconnect(self, connection_id: str):
+		if connection_id not in self.active_connections:
+			return
+
+		conn = self.active_connections[connection_id]
+
+		# Tear down all per-stream subscriptions
+		for sub in conn.subscriptions.values():
+			sub.listener_task.cancel()
+			try:
+				await sub.listener_task
+			except asyncio.CancelledError:
+				pass
+			await sub.redis_conn.close()
+		conn.subscriptions.clear()
+
+		# Remove from active connections
+		del self.active_connections[connection_id]
+
+		logger.info(f"WebSocket disconnected: {connection_id}")
 
 	async def authenticate(self, connection_id: str, token: str) -> Dict:
 		"""
@@ -94,7 +108,7 @@ class WebSocketManager:
 		conn.tier = tier
 		conn.authenticated = True
 
-		logger.info(f"WebSocket authenticated: {connection_id} (user: {user_id}, tier: {tier})")
+		logger.info(f"WebSocket authenticated: {str(connection_id)[:5]} (user: {user_id}, tier: {tier})")
 		return {"uid": user_id, "tier": tier}
 	
 
@@ -162,6 +176,29 @@ class WebSocketManager:
 		logger.info(f"Subscribed {str(connection_id)[:5]} to {stream} (channel: {channel})")
 		await self._send_initial_data(connection_id, stream, filters, channel)
 
+	async def unsubscribe(self, connection_id: str, stream: str):
+		"""
+		Unsubscribe a connection from a stream.
+
+		Args:
+			connection_id: Unique connection identifier
+			stream: Stream name to unsubscribe from
+		"""
+		if connection_id not in self.active_connections:
+			return
+
+		conn = self.active_connections[connection_id]
+
+		if stream in conn.subscriptions:
+			sub = conn.subscriptions.pop(stream)
+			sub.listener_task.cancel()
+			try:
+				await sub.listener_task
+			except asyncio.CancelledError:
+				pass
+			await sub.redis_conn.close()
+			logger.info(f"Unsubscribed {str(connection_id)[:5]} from {stream}")
+
 	async def update_filters(self, connection_id: str, filters: dict, stream: str = None):
 		"""
 		Update filters for a specific subscription without reconnecting.
@@ -205,56 +242,6 @@ class WebSocketManager:
 			await self._send_filtered_data(connection_id, s, merged_filters, cache_key)
 
 		logger.info(f"Updated filters for {str(connection_id)[:5]}: {filters}")
-
-	async def unsubscribe(self, connection_id: str, stream: str):
-		"""
-		Unsubscribe a connection from a stream.
-
-		Args:
-			connection_id: Unique connection identifier
-			stream: Stream name to unsubscribe from
-		"""
-		if connection_id not in self.active_connections:
-			return
-
-		conn = self.active_connections[connection_id]
-
-		if stream in conn.subscriptions:
-			sub = conn.subscriptions.pop(stream)
-			sub.listener_task.cancel()
-			try:
-				await sub.listener_task
-			except asyncio.CancelledError:
-				pass
-			await sub.redis_conn.close()
-			logger.info(f"Unsubscribed {str(connection_id)[:5]} from {stream}")
-
-	async def disconnect(self, connection_id: str):
-		"""
-		Clean up a disconnected WebSocket connection.
-
-		Args:
-			connection_id: Unique connection identifier
-		"""
-		if connection_id not in self.active_connections:
-			return
-
-		conn = self.active_connections[connection_id]
-
-		# Tear down all per-stream subscriptions
-		for sub in conn.subscriptions.values():
-			sub.listener_task.cancel()
-			try:
-				await sub.listener_task
-			except asyncio.CancelledError:
-				pass
-			await sub.redis_conn.close()
-		conn.subscriptions.clear()
-
-		# Remove from active connections
-		del self.active_connections[connection_id]
-
-		logger.info(f"WebSocket disconnected: {connection_id}")
 
 	async def send_message(self, connection_id: str, message: dict):
 		"""
