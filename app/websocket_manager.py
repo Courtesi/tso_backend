@@ -121,6 +121,8 @@ class WebSocketManager:
 			stream: Stream name ("arbs" or "terminal")
 			filters: Filter configuration dict
 		"""
+		subscribe_st = time.time()
+
 		if connection_id not in self.active_connections:
 			raise ValueError("Connection not found")
 
@@ -173,8 +175,11 @@ class WebSocketManager:
 			listener_task=listener_task,
 		)
 
-		logger.info(f"Subscribed {str(connection_id)[:5]} to {stream} (channel: {channel})")
+		sid_st = time.time()
 		await self._send_initial_data(connection_id, stream, filters, channel)
+		subscribe_et = round(time.time() - subscribe_st, 2)
+		sid_et = round(time.time() - sid_st, 2)
+		logger.info(f"Subscribed {str(connection_id)[:5]} to {stream} (channel: {channel}); {subscribe_et=}, {sid_et=}")
 
 	async def unsubscribe(self, connection_id: str, stream: str):
 		"""
@@ -209,6 +214,9 @@ class WebSocketManager:
 			filters: New filter configuration dict
 			stream: Target stream name (if None, updates all subscriptions for backwards compat)
 		"""
+		sfd_time = 0
+		uf_st = time.time()
+
 		if connection_id not in self.active_connections:
 			raise ValueError("Connection not found")
 
@@ -218,9 +226,9 @@ class WebSocketManager:
 		if stream:
 			# Explicit stream requested — only update if it's actually subscribed
 			streams_to_update = [stream] if stream in conn.subscriptions else []
+			logger.info(f"Updating filters for {stream} for {str(connection_id)[:5]}")
 		else:
-			# No stream specified — update all (backwards compat)
-			streams_to_update = list(conn.subscriptions.keys())
+			raise ValueError("No stream specified")
 
 		for s in streams_to_update:
 			# Merge new filters with existing subscription filters
@@ -238,10 +246,12 @@ class WebSocketManager:
 			else:
 				continue
 
-			logger.debug(f"Applying merged filters for {s}: {merged_filters}")
+			sfd_st = time.time()
 			await self._send_filtered_data(connection_id, s, merged_filters, cache_key)
-
-		logger.info(f"Updated filters for {str(connection_id)[:5]}: {filters}")
+			sfd_time += time.time() - sfd_st
+		
+		uf_et = round(time.time() - uf_st, 2)
+		logger.info(f"Updated filters ({uf_et=}, {round(sfd_time, 2)=}) for {str(connection_id)[:5]}: stream={stream}, filters={filters}")
 
 	async def send_message(self, connection_id: str, message: dict):
 		"""
@@ -305,16 +315,6 @@ class WebSocketManager:
 			return
 
 		try:
-			# redis_client = redis.Redis(
-			# 	host=settings.REDIS_HOST,
-			# 	port=settings.REDIS_PORT,
-			# 	db=settings.REDIS_DB,
-			# 	password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
-			# 	decode_responses=True
-			# )
-			# cached_data_raw = await redis_client.get(cache_key)
-			# await redis_client.close()
-
 			cached_data_raw = await shared_redis.redis.get(cache_key)
 			if not cached_data_raw:
 				await self.send_message(connection_id, {
