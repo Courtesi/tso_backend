@@ -3,9 +3,11 @@
 Auto-embeds .env.example content into README.md between markers.
 Runs automatically via pre-commit hook.
 """
+
 import re
 import sys
 from pathlib import Path
+
 
 def embed_env_in_readme():
     """Replace content between markers with current .env.example content."""
@@ -26,10 +28,10 @@ def embed_env_in_readme():
         return 1
 
     # Read .env.example content
-    env_content = env_file.read_text(encoding='utf-8')
+    env_content = env_file.read_text(encoding="utf-8")
 
     # Read README content
-    readme_content = readme_file.read_text(encoding='utf-8')
+    readme_content = readme_file.read_text(encoding="utf-8")
 
     # Define markers
     start_marker = "<!-- ENV_EXAMPLE_START -->"
@@ -54,10 +56,11 @@ def embed_env_in_readme():
         return 0
 
     # Write updated README
-    readme_file.write_text(new_readme, encoding='utf-8')
+    readme_file.write_text(new_readme, encoding="utf-8")
     print(f"Updated {readme_file} with {env_file} content")
 
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(embed_env_in_readme())

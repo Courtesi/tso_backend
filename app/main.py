@@ -11,38 +11,41 @@ import firebase_admin
 from firebase_admin import credentials
 
 settings = get_settings()
-      
+
+
 # Custom filter to exclude health check logs
 class HealthCheckFilter(logging.Filter):
-	def filter(self, record: logging.LogRecord) -> bool:
-		return "/api/health" not in record.getMessage()
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/health" not in record.getMessage()
+
 
 # Development: logs to console only, hide access logs
 logging.basicConfig(
-	level=logging.INFO,
-	format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 uvicorn_logger = logging.getLogger("uvicorn.access")
 uvicorn_logger.setLevel(logging.INFO)
 uvicorn_logger.addFilter(HealthCheckFilter())
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await redis_client.connect()
 
     yield
-    
+
     await redis_client.disconnect()
-    
+
+
 app = FastAPI(lifespan=lifespan)
 origins = [settings.FRONTEND_URL]
 
 app.add_middleware(
-	CORSMiddleware,
-	allow_origins=origins,
-	allow_credentials=True,
-	allow_methods=["*"],
-	allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(router, prefix="/api")
