@@ -27,6 +27,7 @@ class SubscriptionState:
 	filters: Dict
 	redis_conn: redis.Redis
 	listener_task: asyncio.Task
+	last_data: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -226,7 +227,6 @@ class WebSocketManager:
 		if stream:
 			# Explicit stream requested — only update if it's actually subscribed
 			streams_to_update = [stream] if stream in conn.subscriptions else []
-			logger.info(f"Updating filters for {stream} for {str(connection_id)[:5]}")
 		else:
 			raise ValueError("No stream specified")
 
@@ -235,11 +235,18 @@ class WebSocketManager:
 			conn.subscriptions[s].filters.update(filters)
 			merged_filters = conn.subscriptions[s].filters
 
+			# Use in-memory cached data if the listener has received at least one update
+			cached = conn.subscriptions[s].last_data
+			if cached:
+				sfd_st = time.time()
+				await self._send_from_cache(connection_id, s, merged_filters, cached)
+				sfd_time += time.time() - sfd_st
+				continue
+
 			if s == "arbs":
 				cache_key = settings.PREMIUM_KEY_PREFIX if conn.tier == "premium" else settings.FREE_KEY_PREFIX
 				cache_key = f"{settings.REDIS_KEY_PREFIX}{cache_key}"
 			elif s == "terminal":
-				# ALWAYS fetch from "all" cache and apply league filter (ensures consistency with pubsub)
 				cache_key = f"{settings.REDIS_KEY_PREFIX}terminal:all"
 			elif s == "ev":
 				cache_key = f"{settings.REDIS_KEY_PREFIX}ev:{conn.tier}"
@@ -330,6 +337,9 @@ class WebSocketManager:
 
 			cached_data = json.loads(cached_data_raw)
 
+			if stream in conn.subscriptions:
+				conn.subscriptions[stream].last_data = cached_data
+
 			if stream == "arbs":
 				filtered_data = filter_utils.apply_arb_filters(
 					cached_data.get("data", []),
@@ -367,6 +377,54 @@ class WebSocketManager:
 		except Exception as e:
 			logger.error(f"Failed to send filtered data to {connection_id}: {e}")
 
+	async def _send_from_cache(
+		self,
+		connection_id: str,
+		stream: str,
+		filters: dict,
+		cached_data: dict
+	):
+		"""Filter and send already-parsed data without a Redis round-trip."""
+		conn = self.active_connections.get(connection_id)
+		if not conn:
+			return
+
+		try:
+			if stream == "arbs":
+				filtered_data = filter_utils.apply_arb_filters(
+					cached_data.get("data", []),
+					filters,
+					conn.tier
+				)
+			elif stream == "terminal":
+				filtered_data = filter_utils.apply_terminal_filters(
+					cached_data.get("data", []),
+					filters,
+					conn.tier
+				)
+			elif stream == "ev":
+				filtered_data = filter_utils.apply_ev_filters(
+					cached_data.get("data", []),
+					filters,
+					conn.tier
+				)
+			else:
+				filtered_data = cached_data.get("data", [])
+
+			await self.send_message(connection_id, {
+				"type": "data",
+				"stream": stream,
+				"payload": {
+					"tier": conn.tier,
+					"data": filtered_data,
+					"metadata": cached_data.get("metadata", {}),
+					"cached_at": cached_data.get("cached_at")
+				}
+			})
+
+		except Exception as e:
+			logger.error(f"Failed to send cached data to {connection_id}: {e}")
+
 	async def _redis_listener(self, connection_id: str, stream: str, channel: str, redis_conn: redis.Redis):
 		"""
 		Listen for Redis pub/sub messages and forward to WebSocket.
@@ -395,6 +453,9 @@ class WebSocketManager:
 
 					if message and message.get("type", "") == "message":
 						cache_data = json.loads(message["data"])
+
+						if stream in conn.subscriptions:
+							conn.subscriptions[stream].last_data = cache_data
 
 						filters = conn.subscriptions[stream].filters if stream in conn.subscriptions else {}
 
