@@ -229,7 +229,8 @@ class EVBetSide(BaseModel):
     team: str
     odds: int
     sportsbook: str
-    implied_probability: float
+    probability: float
+    link: str | None
 
     class Config:
         json_schema_extra = {
@@ -237,7 +238,8 @@ class EVBetSide(BaseModel):
                 "team": "Lakers",
                 "odds": 150,
                 "sportsbook": "DraftKings",
-                "implied_probability": 0.4,
+                "probability": 0.4,
+				"link": "https://kalshi.com",
             }
         }
 
@@ -271,6 +273,7 @@ class EVBet(BaseModel):
                     "odds": 150,
                     "sportsbook": "DraftKings",
                     "implied_probability": 0.4,
+					"link": "https://kalshi.com",
                 },
                 "true_odds": {
                     "platform": "Kalshi",

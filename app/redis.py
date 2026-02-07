@@ -15,7 +15,6 @@ class RedisClient:
         self.redis: Optional[redis.Redis] = None
 
     async def connect(self):
-        """Connect to Redis server"""
         try:
             self.redis = redis.Redis(
                 host=settings.REDIS_HOST,
@@ -36,7 +35,6 @@ class RedisClient:
             raise
 
     async def disconnect(self):
-        """Disconnect from Redis"""
         if self.redis:
             await self.redis.close()
             logger.info("Disconnected from Redis")
@@ -46,7 +44,6 @@ class RedisClient:
         return f"{settings.REDIS_KEY_PREFIX}{key}"
 
     async def get(self, key: str) -> Optional[Any]:
-        """Get value from cache"""
         if not self.redis:
             return None
 
@@ -61,7 +58,6 @@ class RedisClient:
             return None
 
     async def set(self, key: str, value: Any, ttl: int) -> bool:
-        """Set value in cache with TTL"""
         if not self.redis:
             return False
 
@@ -75,7 +71,6 @@ class RedisClient:
             return False
 
     async def delete(self, key: str) -> bool:
-        """Delete key from cache"""
         if not self.redis:
             return False
 
@@ -88,7 +83,6 @@ class RedisClient:
             return False
 
     async def exists(self, key: str) -> bool:
-        """Check if key exists in cache"""
         if not self.redis:
             return False
 
