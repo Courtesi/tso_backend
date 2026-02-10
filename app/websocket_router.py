@@ -150,7 +150,7 @@ async def authenticate_connection(websocket: WebSocket, connection_id: str) -> b
         initial_et = round(time.time() - initial_st, 2)
         logger.info(f"trying to receive auth message, received in {initial_et} seconds")
     except asyncio.TimeoutError:
-        logger.warning(f"Authentication timeout for {connection_id}")
+        logger.warning(f"Authentication timeout for {connection_id[:5]}")
         await websocket.close(code=1008)
         return False
 
@@ -238,11 +238,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
             except asyncio.TimeoutError:
                 logger.info(
-                    f"Client {connection_id} timed out (no message in {RECEIVE_TIMEOUT}s)"
+                    f"Client {connection_id[:5]} timed out (no message in {RECEIVE_TIMEOUT}s)"
                 )
                 break
             except WebSocketDisconnect:
-                logger.info(f"Client disconnected: {connection_id}")
+                logger.info(f"Client disconnected: {connection_id[:5]}")
                 break
             except Exception as e:
                 error_msg = str(e).lower()
@@ -251,10 +251,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     or "close" in error_msg
                     or "accept" in error_msg
                 ):
-                    logger.info(f"Client connection lost: {connection_id}")
+                    logger.info(f"Client connection lost: {connection_id[:5]}")
                     break
 
-                logger.error(f"Error receiving message from {connection_id}: {e}")
+                logger.error(f"Error receiving message from {connection_id[:5]}: {e}")
                 await ws_manager.send_message(
                     connection_id,
                     {
@@ -273,8 +273,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 logger.info(f"Handled message in {handle_et} seconds")
 
     except WebSocketDisconnect:
-        logger.info(f"Client disconnected during setup: {connection_id}")
+        logger.info(f"Client disconnected during setup: {connection_id[:5]}")
     except Exception as e:
-        logger.error(f"Fatal error in WebSocket connection {connection_id}: {e}")
+        logger.error(f"Fatal error in WebSocket connection {connection_id[:5]}: {e}")
     finally:
         await ws_manager.disconnect(connection_id)
