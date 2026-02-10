@@ -143,9 +143,8 @@ class WebSocketManager:
             )
             channel = f"{settings.REDIS_KEY_PREFIX}{cache_key}:updates"
         elif stream == "terminal":
-            # ALWAYS subscribe to "all" channel and rely on filtering to prevent filter change issues
-            cache_key = "terminal:all"
-            channel = f"{settings.REDIS_KEY_PREFIX}{cache_key}:updates"
+            # Subscribe to all sportsbook channels via pattern
+            channel = "sportsbook:*:bets"
         elif stream == "ev":
             cache_key = f"ev:{conn.tier}"
             channel = f"{settings.REDIS_KEY_PREFIX}ev:{conn.tier}:updates"
@@ -183,10 +182,15 @@ class WebSocketManager:
             listener_task=listener_task,
         )
 
-        sid_st = time.time()
-        await self._send_initial_data(connection_id, stream, filters, channel)
+        # Terminal initial data is loaded by the frontend via REST /api/terminal/lines
+        if stream != "terminal":
+            sid_st = time.time()
+            await self._send_initial_data(connection_id, stream, filters, channel)
+            sid_et = round(time.time() - sid_st, 2)
+        else:
+            sid_et = 0
+
         subscribe_et = round(time.time() - subscribe_st, 2)
-        sid_et = round(time.time() - sid_st, 2)
         logger.info(
             f"Subscribed {str(connection_id)[:5]} to {stream} (channel: {channel}); {subscribe_et=}, {sid_et=}"
         )
@@ -449,9 +453,13 @@ class WebSocketManager:
             return
 
         pubsub = redis_conn.pubsub()
+        use_pattern = stream == "terminal"
 
         try:
-            await pubsub.subscribe(channel)
+            if use_pattern:
+                await pubsub.psubscribe(channel)
+            else:
+                await pubsub.subscribe(channel)
 
             while connection_id in self.active_connections:
                 try:
@@ -460,7 +468,42 @@ class WebSocketManager:
                         timeout=2.0,
                     )
 
-                    if message and message.get("type", "") == "message":
+                    if not message:
+                        await asyncio.sleep(0.1)
+                        continue
+
+                    msg_type = message.get("type", "")
+
+                    if msg_type == "pmessage":
+                        # Pattern subscription (terminal stream — sportsbook updates)
+                        actual_channel = message.get("channel", "")
+                        if isinstance(actual_channel, bytes):
+                            actual_channel = actual_channel.decode()
+
+                        # sportsbook:{name}:bets -> name
+                        parts = actual_channel.split(":")
+                        sportsbook_name = parts[1] if len(parts) >= 2 else ""
+
+                        raw_data = json.loads(message["data"])
+                        filtered_data = filter_utils.filter_sportsbook_events_by_tier(
+                            raw_data, conn.tier
+                        )
+
+                        await self.send_message(
+                            connection_id,
+                            {
+                                "type": "data",
+                                "stream": stream,
+                                "payload": {
+                                    "data": filtered_data,
+                                    "sportsbook": sportsbook_name,
+                                    "timestamp": int(time.time()),
+                                },
+                            },
+                        )
+
+                    elif msg_type == "message":
+                        # Regular subscription (arbs, ev streams)
                         cache_data = json.loads(message["data"])
 
                         if stream in conn.subscriptions:
@@ -476,10 +519,6 @@ class WebSocketManager:
                             filtered_data = filter_utils.apply_arb_filters(
                                 cache_data.get("data", []), filters, conn.tier
                             )
-                        elif stream == "terminal":
-                            filtered_data = filter_utils.apply_terminal_tier_filters(
-                                cache_data.get("data", []), conn.tier
-                            )
                         elif stream == "ev":
                             filtered_data = filter_utils.apply_ev_filters(
                                 cache_data.get("data", []), filters, conn.tier
@@ -487,18 +526,19 @@ class WebSocketManager:
                         else:
                             filtered_data = cache_data.get("data", [])
 
-                        response_data = {
-                            "type": "data",
-                            "stream": stream,
-                            "payload": {
-                                "tier": conn.tier,
-                                "data": filtered_data,
-                                "metadata": cache_data.get("metadata", {}),
-                                "cached_at": cache_data.get("cached_at"),
+                        await self.send_message(
+                            connection_id,
+                            {
+                                "type": "data",
+                                "stream": stream,
+                                "payload": {
+                                    "tier": conn.tier,
+                                    "data": filtered_data,
+                                    "metadata": cache_data.get("metadata", {}),
+                                    "cached_at": cache_data.get("cached_at"),
+                                },
                             },
-                        }
-
-                        await self.send_message(connection_id, response_data)
+                        )
 
                     else:
                         await asyncio.sleep(0.1)
@@ -514,7 +554,10 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Fatal error in Redis listener for {connection_id}: {e}")
         finally:
-            await pubsub.unsubscribe(channel)
+            if use_pattern:
+                await pubsub.punsubscribe(channel)
+            else:
+                await pubsub.unsubscribe(channel)
             await pubsub.close()
 
 

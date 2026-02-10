@@ -106,6 +106,21 @@ def apply_arb_filters(arbs: List[dict], filters: dict, tier: str) -> List[dict]:
     return filtered
 
 
+def filter_sportsbook_events_by_tier(events: List[dict], tier: str) -> List[dict]:
+    """
+    Filter raw sportsbook events (from sportsbook:*:bets pubsub) by tier.
+
+    Enforces league restrictions so free users only receive events
+    from allowed leagues. Used in the WebSocket pmessage handler.
+    """
+    allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(tier)
+    if not allowed_leagues:
+        return events
+
+    allowed_set = set(league.upper() for league in allowed_leagues)
+    return [e for e in events if e.get("league", "").upper() in allowed_set]
+
+
 def apply_terminal_tier_filters(games: List[dict], tier: str) -> List[dict]:
     """
     Apply only tier-level security filters to terminal data.
