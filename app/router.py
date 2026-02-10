@@ -1,11 +1,15 @@
 from fastapi import APIRouter, Body, Depends, File, Form, UploadFile
 from typing import Annotated, Optional
+import json
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
 from app.config import get_settings, SPORTSBOOKS, TIER_FEATURES
-from app.dependencies import get_firebase_user_from_token
+from app.dependencies import get_firebase_user_from_token, get_user_with_tier
+from app.filter_utils import apply_terminal_tier_filters
+from app.redis import redis_client as shared_redis
 
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
@@ -13,7 +17,7 @@ from fastapi.exceptions import HTTPException
 from firebase_admin import auth
 import stripe
 import resend
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 settings = get_settings()
 router = APIRouter()
@@ -60,6 +64,157 @@ async def get_tiers():
     return {
         "tiers": tier_data,
         "all_leagues": settings.ALL_LEAGUES,
+    }
+
+
+# ==================== TERMINAL / LINE HISTORY ====================
+
+
+@router.get("/terminal/lines")
+async def get_terminal_lines(user: Annotated[dict, Depends(get_user_with_tier)]):
+    """
+    Returns line history from Redis sorted sets, transformed into
+    the GameTerminalData format the frontend expects.
+    Called once on page load to bootstrap chart state.
+    """
+    r = shared_redis.redis
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis not available")
+
+    now = int(time.time())
+    window_start = now - settings.LINES_TTL
+
+    # 1. Load all event metadata
+    event_keys = [k async for k in r.scan_iter(match="event:*")]
+    if not event_keys:
+        return {"data": [], "metadata": {"count": 0}}
+
+    event_values = await r.mget(event_keys)
+    events = {}
+    for raw in event_values:
+        if not raw:
+            continue
+        meta = json.loads(raw)
+        events[meta["event_id"]] = meta
+
+    # 2. Load all line keys and group by event
+    line_keys = [k async for k in r.scan_iter(match="lines:*")]
+
+    # Group: event_id -> market_type -> outcome_id -> key
+    grouped = {}
+    for key in line_keys:
+        key_str = key.decode() if isinstance(key, bytes) else key
+        parts = key_str.split(":")
+        if len(parts) != 4:
+            continue
+        _, event_id, market_type, outcome_name = parts
+        grouped.setdefault(event_id, {}).setdefault(market_type, {})[outcome_name] = key
+
+    # 3. Build games
+    games = []
+    for event_id, markets in grouped.items():
+        meta = events.get(event_id)
+        if not meta:
+            continue
+
+        home = meta.get("home_team", "Unknown")
+        away = meta.get("away_team", "Unknown")
+
+        # Map lowercased team names to their proper display form
+        team_display = {home.lower(): home, away.lower(): away}
+
+        market_list = []
+        for market_type, outcomes in markets.items():
+            outcome_list = []
+            for outcome_name, redis_key in outcomes.items():
+                raw_members = await r.zrangebyscore(redis_key, window_start, now)
+                if not raw_members:
+                    continue
+
+                history = []
+                history_by_sportsbook = {}
+                for member in raw_members:
+                    point = json.loads(member)
+                    history.append(point)
+                    sb = point.get("sportsbook")
+                    if sb:
+                        history_by_sportsbook.setdefault(sb, []).append(point)
+
+                latest = max(history, key=lambda x: x["timestamp"])
+
+                # Recover proper capitalization from event metadata
+                display_name = team_display.get(outcome_name)
+                if not display_name:
+                    # Spread/total: try matching the team prefix (e.g. "celtics -3.5")
+                    for lower_team, proper_team in team_display.items():
+                        if outcome_name.startswith(lower_team):
+                            display_name = proper_team + outcome_name[len(lower_team) :]
+                            break
+                    else:
+                        display_name = outcome_name.title()
+
+                outcome_list.append(
+                    {
+                        "outcome_id": redis_key,
+                        "outcome_name": display_name,
+                        "history": history,
+                        "current_best_odds": latest["odds"],
+                        "current_best_sportsbook": latest["sportsbook"],
+                        "history_by_sportsbook": history_by_sportsbook,
+                    }
+                )
+
+            if not outcome_list:
+                continue
+
+            display = {"MONEY": "Moneyline", "SPREAD": "Spread", "TOTAL": "Total"}
+            market_list.append(
+                {
+                    "market_type": market_type,
+                    "market_display": display.get(market_type, market_type.title()),
+                    "outcomes": outcome_list,
+                }
+            )
+
+        if not market_list:
+            continue
+        start_time = meta.get("start_time", "")
+
+        game_status = "upcoming"
+        try:
+            st = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+            utc_now = datetime.now(timezone.utc)
+            if st <= utc_now < st + timedelta(hours=4):
+                game_status = "live"
+            elif st + timedelta(hours=4) <= utc_now:
+                game_status = "completed"
+        except (ValueError, AttributeError):
+            pass
+
+        games.append(
+            {
+                "event_id": event_id,
+                "sport": meta.get("sport", "Unknown"),
+                "league": meta.get("league", "Unknown"),
+                "home_team": home,
+                "away_team": away,
+                "matchup": f"{away} @ {home}",
+                "start_time": start_time,
+                "game_status": game_status,
+                "markets": market_list,
+            }
+        )
+
+    games.sort(key=lambda g: g.get("start_time", ""))
+
+    tier = user.get("tier", "free")
+    games = apply_terminal_tier_filters(games, tier)
+
+    return {
+        "tier": tier,
+        "data": games,
+        "metadata": {"count": len(games)},
+        "cached_at": datetime.now(timezone.utc).isoformat() + "Z",
     }
 
 
