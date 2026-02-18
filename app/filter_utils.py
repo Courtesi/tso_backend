@@ -125,9 +125,9 @@ def apply_terminal_tier_filters(games: List[dict], tier: str) -> List[dict]:
     """
     Apply only tier-level security filters to terminal data.
 
-    Enforces league restrictions and game count caps per tier,
-    without applying user-preference filters (league selection,
-    sportsbooks, game_time). Those are handled client-side.
+    Enforces league restrictions per tier, without applying
+    user-preference filters (league selection, sportsbooks,
+    game_time). Those are handled client-side.
     """
     filtered = games
 
@@ -135,10 +135,6 @@ def apply_terminal_tier_filters(games: List[dict], tier: str) -> List[dict]:
     if allowed_leagues:
         allowed_set = set(league.upper() for league in allowed_leagues)
         filtered = [g for g in filtered if g.get("league", "").upper() in allowed_set]
-
-    max_games = settings.TIER_MAX_GAMES.get(tier)
-    if max_games:
-        filtered = filtered[:max_games]
 
     return filtered
 
@@ -181,10 +177,6 @@ def apply_terminal_filters(games: List[dict], filters: dict, tier: str) -> List[
     game_time = filters.get("game_time")
     if game_time:
         filtered = filter_terminal_data(filtered, game_time=game_time)
-
-    max_games = settings.TIER_MAX_GAMES.get(tier)
-    if max_games:
-        filtered = filtered[:max_games]
 
     sportsbooks_filter = filters.get("sportsbooks")
     if (

@@ -55,7 +55,7 @@ class WebSocketManager:
     async def connect(self, websocket: WebSocket, connection_id: str):
         await websocket.accept()
         self.active_connections[connection_id] = ConnectionState(websocket=websocket)
-        logger.info(f"WebSocket connected: {connection_id}")
+        logger.info(f"WebSocket connected: {connection_id[:5]}")
 
     async def disconnect(self, connection_id: str):
         if connection_id not in self.active_connections:
@@ -76,7 +76,7 @@ class WebSocketManager:
         # Remove from active connections
         del self.active_connections[connection_id]
 
-        logger.info(f"WebSocket disconnected: {connection_id}")
+        # logger.info(f"WebSocket disconnected: {connection_id[:5]}")
 
     async def authenticate(self, connection_id: str, token: str) -> Dict:
         """
@@ -98,7 +98,7 @@ class WebSocketManager:
         try:
             user = verify_id_token(token)
         except Exception as e:
-            logger.error(f"Authentication failed for {connection_id}: {e}")
+            logger.error(f"Authentication failed for {connection_id[:5]}: {e}")
             raise ValueError(f"Authentication failed: {str(e)}")
 
         user_id = user.get("uid")
@@ -143,8 +143,12 @@ class WebSocketManager:
             )
             channel = f"{settings.REDIS_KEY_PREFIX}{cache_key}:updates"
         elif stream == "terminal":
-            # Subscribe to all sportsbook channels via pattern
-            channel = "sportsbook:*:bets"
+            league = filters.get("league", "NBA")
+            # Validate tier access to this league
+            allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(conn.tier)
+            if allowed_leagues and league.upper() not in (allowed_league.upper() for allowed_league in allowed_leagues):
+                raise ValueError(f"League {league} not available for {conn.tier} tier")
+            channel = f"lines:{league}"
         elif stream == "ev":
             cache_key = f"ev:{conn.tier}"
             channel = f"{settings.REDIS_KEY_PREFIX}ev:{conn.tier}:updates"
@@ -299,11 +303,11 @@ class WebSocketManager:
         except Exception as e:
             error_msg = str(e).lower()
             if "close" in error_msg or "not connected" in error_msg:
-                logger.warning(f"Connection {connection_id} is dead, cleaning up: {e}")
+                logger.warning(f"Connection {connection_id[:5]} is dead, cleaning up: {e}")
                 await self.disconnect(connection_id)
             else:
                 logger.error(
-                    f"Failed to send message to {connection_id} (type={message.get('type')}): {e}"
+                    f"Failed to send message to {connection_id[:5]} (type={message.get('type')}): {e}"
                 )
 
     async def _send_initial_data(
@@ -393,7 +397,7 @@ class WebSocketManager:
             await self.send_message(connection_id, response_data)
 
         except Exception as e:
-            logger.error(f"Failed to send filtered data to {connection_id}: {e}")
+            logger.error(f"Failed to send filtered data to {connection_id[:5]}: {e}")
 
     async def _send_from_cache(
         self, connection_id: str, stream: str, filters: dict, cached_data: dict
@@ -434,7 +438,7 @@ class WebSocketManager:
             )
 
         except Exception as e:
-            logger.error(f"Failed to send cached data to {connection_id}: {e}")
+            logger.error(f"Failed to send cached data to {connection_id[:5]}: {e}")
 
     async def _redis_listener(
         self, connection_id: str, stream: str, channel: str, redis_conn: redis.Redis
@@ -453,13 +457,9 @@ class WebSocketManager:
             return
 
         pubsub = redis_conn.pubsub()
-        use_pattern = stream == "terminal"
 
         try:
-            if use_pattern:
-                await pubsub.psubscribe(channel)
-            else:
-                await pubsub.subscribe(channel)
+            await pubsub.subscribe(channel)
 
             while connection_id in self.active_connections:
                 try:
@@ -472,39 +472,27 @@ class WebSocketManager:
                         await asyncio.sleep(0.1)
                         continue
 
-                    msg_type = message.get("type", "")
+                    if message.get("type") != "message":
+                        await asyncio.sleep(0.1)
+                        continue
 
-                    if msg_type == "pmessage":
-                        # Pattern subscription (terminal stream — sportsbook updates)
-                        actual_channel = message.get("channel", "")
-                        if isinstance(actual_channel, bytes):
-                            actual_channel = actual_channel.decode()
+                    raw_data = json.loads(message["data"])
 
-                        # sportsbook:{name}:bets -> name
-                        parts = actual_channel.split(":")
-                        sportsbook_name = parts[1] if len(parts) >= 2 else ""
-
-                        raw_data = json.loads(message["data"])
-                        filtered_data = filter_utils.filter_sportsbook_events_by_tier(
-                            raw_data, conn.tier
-                        )
-
+                    if stream == "terminal":
+                        # lines:{league} — forward LineUpdate[] directly
                         await self.send_message(
                             connection_id,
                             {
                                 "type": "data",
                                 "stream": stream,
                                 "payload": {
-                                    "data": filtered_data,
-                                    "sportsbook": sportsbook_name,
-                                    "timestamp": int(time.time()),
+                                    "data": raw_data,
                                 },
                             },
                         )
-
-                    elif msg_type == "message":
-                        # Regular subscription (arbs, ev streams)
-                        cache_data = json.loads(message["data"])
+                    else:
+                        # arbs / ev streams — apply filters
+                        cache_data = raw_data
 
                         if stream in conn.subscriptions:
                             conn.subscriptions[stream].last_data = cache_data
@@ -540,24 +528,18 @@ class WebSocketManager:
                             },
                         )
 
-                    else:
-                        await asyncio.sleep(0.1)
-
                 except asyncio.TimeoutError:
                     continue
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.error(f"Error in Redis listener for {connection_id}: {e}")
+                    logger.error(f"Error in Redis listener for {connection_id[:5]}: {e}")
                     await asyncio.sleep(1)
 
         except Exception as e:
-            logger.error(f"Fatal error in Redis listener for {connection_id}: {e}")
+            logger.error(f"Fatal error in Redis listener for {connection_id[:5]}: {e}")
         finally:
-            if use_pattern:
-                await pubsub.punsubscribe(channel)
-            else:
-                await pubsub.unsubscribe(channel)
+            await pubsub.unsubscribe(channel)
             await pubsub.close()
 
 

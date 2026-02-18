@@ -30,8 +30,6 @@ class Settings(BaseSettings):
 
     TIER_MAX_ARBS: dict = {"free": 5, "premium": None}
 
-    TIER_MAX_GAMES: dict = {"free": 10, "premium": None}
-
     TIER_MAX_EVS: dict = {"free": 5, "premium": None}
 
     ALL_LEAGUES: list = ["NBA", "NFL", "NHL", "MLB", "NCAAB", "NCAAF"]

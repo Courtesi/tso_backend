@@ -48,7 +48,7 @@ async def get_sportsbooks():
 async def get_tiers():
 	"""
 	Returns tier features configuration for the subscription page.
-	Also includes tier limits (allowed leagues, max games, etc).
+	Also includes tier limits (allowed leagues, max arbs, etc).
 	Public endpoint - no authentication required.
 	"""
 	# Combine display features with tier limits
@@ -57,7 +57,6 @@ async def get_tiers():
 		tier_data[tier_name] = {
 			**features,
 			"allowed_leagues": settings.TIER_ALLOWED_LEAGUES.get(tier_name),
-			"max_games": settings.TIER_MAX_GAMES.get(tier_name),
 			"max_arbs": settings.TIER_MAX_ARBS.get(tier_name),
 		}
 
@@ -71,13 +70,16 @@ async def get_tiers():
 
 
 @router.get("/terminal/lines")
-async def get_terminal_lines(user: Annotated[dict, Depends(get_user_with_tier)]):
+async def get_terminal_lines(
+	user: Annotated[dict, Depends(get_user_with_tier)],
+	league: str = "NBA",
+):
 	"""
-	Returns line history from Redis sorted sets, transformed into
-	the GameTerminalData format the frontend expects.
+	Returns line history from Redis sorted sets for a single league,
+	transformed into the GameTerminalData format the frontend expects.
 	Called once on page load to bootstrap chart state.
 	"""
-	
+
 	lines_start = time.time()
 	r = shared_redis.redis
 	if not r:
@@ -86,12 +88,26 @@ async def get_terminal_lines(user: Annotated[dict, Depends(get_user_with_tier)])
 	now = int(time.time())
 	window_start = now - settings.LINES_TTL
 
-	# 1. Load all event metadata
-	event_keys = [k async for k in r.scan_iter(match="event:*")]
-	if not event_keys:
+	# 1. Load line keys for the requested league and group by event
+	line_keys = [k async for k in r.scan_iter(match=f"lines:{league}:*")]
+
+	# Group: event_id -> market_type -> outcome_name -> key
+	grouped = {}
+	for key in line_keys:
+		key_str = key.decode() if isinstance(key, bytes) else key
+		parts = key_str.split(":")
+		if len(parts) != 5:
+			continue
+		_, _league, market_type, event_id, outcome_name = parts
+		grouped.setdefault(event_id, {}).setdefault(market_type, {})[outcome_name] = key
+
+	if not grouped:
 		return {"data": [], "metadata": {"count": 0}}
 
-	event_values = await r.mget(event_keys)
+	# 2. Load event metadata via mget (no scan needed)
+	event_ids = list(grouped.keys())
+	event_meta_keys = [f"event:{league}:{eid}" for eid in event_ids]
+	event_values = await r.mget(event_meta_keys)
 	events = {}
 	for raw in event_values:
 		if not raw:
@@ -99,22 +115,71 @@ async def get_terminal_lines(user: Annotated[dict, Depends(get_user_with_tier)])
 		meta = json.loads(raw)
 		events[meta["event_id"]] = meta
 
-	# 2. Load all line keys and group by event
-	line_keys = [k async for k in r.scan_iter(match="lines:*")]
-
-	# Group: event_id -> market_type -> outcome_id -> key
-	grouped = {}
-	for key in line_keys:
-		key_str = key.decode() if isinstance(key, bytes) else key
-		parts = key_str.split(":")
-		if len(parts) != 4:
-			continue
-		_, event_id, market_type, outcome_name = parts
-		grouped.setdefault(event_id, {}).setdefault(market_type, {})[outcome_name] = key
-
-	# 3. Build games
-	games = []
+	# 3. Collect all outcome keys and pipeline zrangebyscore calls
+	outcome_entries = []  # (event_id, market_type, outcome_name, redis_key)
 	for event_id, markets in grouped.items():
+		for market_type, outcomes in markets.items():
+			for outcome_name, redis_key in outcomes.items():
+				outcome_entries.append((event_id, market_type, outcome_name, redis_key))
+
+	pipe = r.pipeline(transaction=False)
+	for _, _, _, redis_key in outcome_entries:
+		pipe.zrangebyscore(redis_key, window_start, now)
+	all_results = await pipe.execute()
+
+	# 4. Build games from pipeline results
+	# First, organize results by event_id -> market_type -> list of outcomes
+	outcome_data = {}
+	for (event_id, market_type, outcome_name, redis_key), raw_members in zip(
+		outcome_entries, all_results
+	):
+		if not raw_members:
+			continue
+
+		meta = events.get(event_id)
+		if not meta:
+			continue
+
+		home = meta.get("home_team", "Unknown")
+		away = meta.get("away_team", "Unknown")
+		team_display = {home.lower(): home, away.lower(): away}
+
+		history = []
+		history_by_sportsbook = {}
+		for member in raw_members:
+			point = json.loads(member)
+			history.append(point)
+			sb = point.get("sportsbook")
+			if sb:
+				history_by_sportsbook.setdefault(sb, []).append(point)
+
+		latest = max(history, key=lambda x: x["timestamp"])
+
+		display_name = team_display.get(outcome_name)
+		if not display_name:
+			for lower_team, proper_team in team_display.items():
+				if outcome_name.startswith(lower_team):
+					display_name = proper_team + outcome_name[len(lower_team) :]
+					break
+			else:
+				display_name = outcome_name.title()
+
+		outcome_obj = {
+			"outcome_id": redis_key,
+			"outcome_name": display_name,
+			"history": history,
+			"current_best_odds": latest["odds"],
+			"current_best_sportsbook": latest["sportsbook"],
+			"history_by_sportsbook": history_by_sportsbook,
+		}
+
+		outcome_data.setdefault(event_id, {}).setdefault(market_type, []).append(
+			outcome_obj
+		)
+
+	display_names = {"MONEY": "Moneyline", "SPREAD": "Spread", "TOTAL": "Total"}
+	games = []
+	for event_id, market_outcomes in outcome_data.items():
 		meta = events.get(event_id)
 		if not meta:
 			continue
@@ -122,58 +187,12 @@ async def get_terminal_lines(user: Annotated[dict, Depends(get_user_with_tier)])
 		home = meta.get("home_team", "Unknown")
 		away = meta.get("away_team", "Unknown")
 
-		# Map lowercased team names to their proper display form
-		team_display = {home.lower(): home, away.lower(): away}
-
 		market_list = []
-		for market_type, outcomes in markets.items():
-			outcome_list = []
-			for outcome_name, redis_key in outcomes.items():
-				raw_members = await r.zrangebyscore(redis_key, window_start, now)
-				if not raw_members:
-					continue
-
-				history = []
-				history_by_sportsbook = {}
-				for member in raw_members:
-					point = json.loads(member)
-					history.append(point)
-					sb = point.get("sportsbook")
-					if sb:
-						history_by_sportsbook.setdefault(sb, []).append(point)
-
-				latest = max(history, key=lambda x: x["timestamp"])
-
-				# Recover proper capitalization from event metadata
-				display_name = team_display.get(outcome_name)
-				if not display_name:
-					# Spread/total: try matching the team prefix (e.g. "celtics -3.5")
-					for lower_team, proper_team in team_display.items():
-						if outcome_name.startswith(lower_team):
-							display_name = proper_team + outcome_name[len(lower_team) :]
-							break
-					else:
-						display_name = outcome_name.title()
-
-				outcome_list.append(
-					{
-						"outcome_id": redis_key,
-						"outcome_name": display_name,
-						"history": history,
-						"current_best_odds": latest["odds"],
-						"current_best_sportsbook": latest["sportsbook"],
-						"history_by_sportsbook": history_by_sportsbook,
-					}
-				)
-
-			if not outcome_list:
-				continue
-
-			display = {"MONEY": "Moneyline", "SPREAD": "Spread", "TOTAL": "Total"}
+		for market_type, outcome_list in market_outcomes.items():
 			market_list.append(
 				{
 					"market_type": market_type,
-					"market_display": display.get(market_type, market_type.title()),
+					"market_display": display_names.get(market_type, market_type.title()),
 					"outcomes": outcome_list,
 				}
 			)
@@ -217,6 +236,7 @@ async def get_terminal_lines(user: Annotated[dict, Depends(get_user_with_tier)])
 
 	return {
 		"tier": tier,
+		"league": league,
 		"data": games,
 		"metadata": {"count": len(games)},
 		"cached_at": datetime.now(timezone.utc).isoformat() + "Z",
