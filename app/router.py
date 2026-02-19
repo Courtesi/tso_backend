@@ -69,18 +69,178 @@ async def get_tiers():
 # ==================== TERMINAL / LINE HISTORY ====================
 
 
-@router.get("/terminal/lines")
-async def get_terminal_lines(
+def _compute_game_status(start_time: str) -> str:
+	"""Derive game status string from ISO start_time."""
+	try:
+		st = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+		utc_now = datetime.now(timezone.utc)
+		if st <= utc_now < st + timedelta(hours=4):
+			return "live"
+		elif st + timedelta(hours=4) <= utc_now:
+			return "completed"
+	except (ValueError, AttributeError):
+		pass
+	return "upcoming"
+
+
+def _resolve_display_name(outcome_name: str, home: str, away: str) -> str:
+	"""Map a lowercase outcome_name back to the proper team display name."""
+	team_display = {home.lower(): home, away.lower(): away}
+	if outcome_name in team_display:
+		return team_display[outcome_name]
+	for lower_team, proper_team in team_display.items():
+		if outcome_name.startswith(lower_team):
+			return proper_team + outcome_name[len(lower_team):]
+	return outcome_name.title()
+
+
+MARKET_DISPLAY_NAMES = {"MONEY": "Moneyline", "SPREAD": "Spread", "TOTAL": "Total"}
+
+
+@router.get("/terminal/odds")
+async def get_terminal_odds(
 	user: Annotated[dict, Depends(get_user_with_tier)],
 	league: str = "NBA",
 ):
 	"""
-	Returns line history from Redis sorted sets for a single league,
-	transformed into the GameTerminalData format the frontend expects.
-	Called once on page load to bootstrap chart state.
+	Returns the latest odds for every game in a league, with no history arrays.
+	Reads a single Redis hash (odds:latest:{league}) for a lightweight initial load
+	that populates the odds table before any chart is opened.
 	"""
+	start = time.time()
+	r = shared_redis.redis
+	if not r:
+		raise HTTPException(status_code=503, detail="Redis not available")
 
-	lines_start = time.time()
+	grouped: dict = {}
+	event_ids_seen: set = set()
+
+	# 1. Try the fast path: single hash with all latest odds for the league
+	raw_hash = await r.hgetall(f"odds:latest:{league}")
+	if raw_hash:
+		# Hash fields: "{event_id}:{market_type}:{outcome_name}:{sportsbook}" -> {odds, timestamp}
+		for field, value in raw_hash.items():
+			field_str = field.decode() if isinstance(field, bytes) else field
+			value_str = value.decode() if isinstance(value, bytes) else value
+			parts = field_str.split(":", 3)
+			if len(parts) != 4:
+				continue
+			event_id, market_type, outcome_name, sportsbook = parts
+			point = json.loads(value_str)
+			grouped.setdefault(event_id, {}).setdefault(market_type, {}).setdefault(outcome_name, {})[sportsbook] = point
+			event_ids_seen.add(event_id)
+	else:
+		# Fallback: hash not yet populated — derive latest odds from sorted-set keys.
+		# Fetch only the single newest entry per key to avoid loading full history.
+		line_keys = [k async for k in r.scan_iter(match=f"lines:{league}:*")]
+		if line_keys:
+			pipe = r.pipeline(transaction=False)
+			for key in line_keys:
+				pipe.zrevrangebyscore(key, "+inf", "-inf", start=0, num=1)
+			results = await pipe.execute()
+			for key, members in zip(line_keys, results):
+				if not members:
+					continue
+				key_str = key.decode() if isinstance(key, bytes) else key
+				parts = key_str.split(":")
+				if len(parts) != 5:
+					continue
+				_, _league, market_type, event_id, outcome_name = parts
+				point = json.loads(members[0])
+				sportsbook = point.get("sportsbook")
+				if not sportsbook:
+					continue
+				grouped.setdefault(event_id, {}).setdefault(market_type, {}).setdefault(outcome_name, {})[sportsbook] = point
+				event_ids_seen.add(event_id)
+
+	if not grouped:
+		return {"tier": user.get("tier", "free"), "league": league, "data": [], "metadata": {"count": 0}}
+
+	# 3. Batch-fetch event metadata
+	event_meta_keys = [f"event:{league}:{eid}" for eid in event_ids_seen]
+	event_values = await r.mget(event_meta_keys)
+	events: dict = {}
+	for raw in event_values:
+		if not raw:
+			continue
+		meta = json.loads(raw)
+		events[meta["event_id"]] = meta
+
+	# 4. Build GameTerminalData list (no history arrays)
+	games = []
+	for event_id, markets in grouped.items():
+		meta = events.get(event_id)
+		if not meta:
+			continue
+
+		home = meta.get("home_team", "Unknown")
+		away = meta.get("away_team", "Unknown")
+		start_time = meta.get("start_time", "")
+
+		market_list = []
+		for market_type, outcomes in markets.items():
+			outcome_list = []
+			for outcome_name, sportsbook_points in outcomes.items():
+				# Pick best odds (highest timestamp = most recent)
+				latest_sb, latest_point = max(sportsbook_points.items(), key=lambda item: item[1]["timestamp"])
+				outcome_list.append({
+					"outcome_id": f"lines:{league}:{market_type}:{event_id}:{outcome_name}",
+					"outcome_name": _resolve_display_name(outcome_name, home, away),
+					"history": [],
+					"history_by_sportsbook": {},
+					"current_best_odds": latest_point["odds"],
+					"current_best_sportsbook": latest_sb,
+					# latest_by_sportsbook is used by the odds table to show per-book cells
+					"latest_by_sportsbook": {sb: p["odds"] for sb, p in sportsbook_points.items()},
+				})
+			market_list.append({
+				"market_type": market_type,
+				"market_display": MARKET_DISPLAY_NAMES.get(market_type, market_type.title()),
+				"outcomes": outcome_list,
+			})
+
+		if not market_list:
+			continue
+
+		games.append({
+			"event_id": event_id,
+			"sport": meta.get("sport", "Unknown"),
+			"league": meta.get("league", "Unknown"),
+			"home_team": home,
+			"away_team": away,
+			"matchup": f"{away} @ {home}",
+			"start_time": start_time,
+			"game_status": _compute_game_status(start_time),
+			"markets": market_list,
+		})
+
+	games.sort(key=lambda g: g.get("start_time", ""))
+
+	tier = user.get("tier", "free")
+	games = apply_terminal_tier_filters(games, tier)
+
+	logger.info(f"Odds screen: {len(games)} games for {league} in {time.time() - start:.2f}s")
+
+	return {
+		"tier": tier,
+		"league": league,
+		"data": games,
+		"metadata": {"count": len(games)},
+		"cached_at": datetime.now(timezone.utc).isoformat() + "Z",
+	}
+
+
+@router.get("/terminal/lines/{event_id}")
+async def get_terminal_lines_for_event(
+	event_id: str,
+	user: Annotated[dict, Depends(get_user_with_tier)],
+	league: str = "NBA",
+):
+	"""
+	Returns full line history for a single game (called when the user expands
+	the chart dropdown). Reads the sorted-set keys for this event only.
+	"""
+	start = time.time()
 	r = shared_redis.redis
 	if not r:
 		raise HTTPException(status_code=503, detail="Redis not available")
@@ -88,64 +248,48 @@ async def get_terminal_lines(
 	now = int(time.time())
 	window_start = now - settings.LINES_TTL
 
-	# 1. Load line keys for the requested league and group by event
-	line_keys = [k async for k in r.scan_iter(match=f"lines:{league}:*")]
+	# 1. Scan only the keys for this event
+	line_keys = [k async for k in r.scan_iter(match=f"lines:{league}:*:{event_id}:*")]
+	if not line_keys:
+		raise HTTPException(status_code=404, detail="No line data found for this event")
 
-	# Group: event_id -> market_type -> outcome_name -> key
-	grouped = {}
+	# 2. Group keys by market_type -> outcome_name
+	grouped: dict = {}
 	for key in line_keys:
 		key_str = key.decode() if isinstance(key, bytes) else key
 		parts = key_str.split(":")
 		if len(parts) != 5:
 			continue
-		_, _league, market_type, event_id, outcome_name = parts
-		grouped.setdefault(event_id, {}).setdefault(market_type, {})[outcome_name] = key
+		_, _league, market_type, _event_id, outcome_name = parts
+		grouped.setdefault(market_type, {})[outcome_name] = key
 
-	if not grouped:
-		return {"data": [], "metadata": {"count": 0}}
+	# 3. Load event metadata
+	meta_raw = await r.get(f"event:{league}:{event_id}")
+	if not meta_raw:
+		raise HTTPException(status_code=404, detail="Event metadata not found")
+	meta = json.loads(meta_raw)
+	home = meta.get("home_team", "Unknown")
+	away = meta.get("away_team", "Unknown")
 
-	# 2. Load event metadata via mget (no scan needed)
-	event_ids = list(grouped.keys())
-	event_meta_keys = [f"event:{league}:{eid}" for eid in event_ids]
-	event_values = await r.mget(event_meta_keys)
-	events = {}
-	for raw in event_values:
-		if not raw:
-			continue
-		meta = json.loads(raw)
-		events[meta["event_id"]] = meta
-
-	# 3. Collect all outcome keys and pipeline zrangebyscore calls
-	outcome_entries = []  # (event_id, market_type, outcome_name, redis_key)
-	for event_id, markets in grouped.items():
-		for market_type, outcomes in markets.items():
-			for outcome_name, redis_key in outcomes.items():
-				outcome_entries.append((event_id, market_type, outcome_name, redis_key))
+	# 4. Pipeline zrangebyscore for all outcome keys
+	outcome_entries = []
+	for market_type, outcomes in grouped.items():
+		for outcome_name, redis_key in outcomes.items():
+			outcome_entries.append((market_type, outcome_name, redis_key))
 
 	pipe = r.pipeline(transaction=False)
-	for _, _, _, redis_key in outcome_entries:
+	for _, _, redis_key in outcome_entries:
 		pipe.zrangebyscore(redis_key, window_start, now)
 	all_results = await pipe.execute()
 
-	# 4. Build games from pipeline results
-	# First, organize results by event_id -> market_type -> list of outcomes
-	outcome_data = {}
-	for (event_id, market_type, outcome_name, redis_key), raw_members in zip(
-		outcome_entries, all_results
-	):
+	# 5. Build market/outcome structure with full history
+	market_outcomes: dict = {}
+	for (market_type, outcome_name, redis_key), raw_members in zip(outcome_entries, all_results):
 		if not raw_members:
 			continue
 
-		meta = events.get(event_id)
-		if not meta:
-			continue
-
-		home = meta.get("home_team", "Unknown")
-		away = meta.get("away_team", "Unknown")
-		team_display = {home.lower(): home, away.lower(): away}
-
 		history = []
-		history_by_sportsbook = {}
+		history_by_sportsbook: dict = {}
 		for member in raw_members:
 			point = json.loads(member)
 			history.append(point)
@@ -155,90 +299,45 @@ async def get_terminal_lines(
 
 		latest = max(history, key=lambda x: x["timestamp"])
 
-		display_name = team_display.get(outcome_name)
-		if not display_name:
-			for lower_team, proper_team in team_display.items():
-				if outcome_name.startswith(lower_team):
-					display_name = proper_team + outcome_name[len(lower_team) :]
-					break
-			else:
-				display_name = outcome_name.title()
-
 		outcome_obj = {
-			"outcome_id": redis_key,
-			"outcome_name": display_name,
+			"outcome_id": redis_key if isinstance(redis_key, str) else redis_key.decode(),
+			"outcome_name": _resolve_display_name(outcome_name, home, away),
 			"history": history,
+			"history_by_sportsbook": history_by_sportsbook,
 			"current_best_odds": latest["odds"],
 			"current_best_sportsbook": latest["sportsbook"],
-			"history_by_sportsbook": history_by_sportsbook,
 		}
+		market_outcomes.setdefault(market_type, []).append(outcome_obj)
 
-		outcome_data.setdefault(event_id, {}).setdefault(market_type, []).append(
-			outcome_obj
-		)
+	market_list = [
+		{
+			"market_type": mt,
+			"market_display": MARKET_DISPLAY_NAMES.get(mt, mt.title()),
+			"outcomes": outcomes,
+		}
+		for mt, outcomes in market_outcomes.items()
+	]
 
-	display_names = {"MONEY": "Moneyline", "SPREAD": "Spread", "TOTAL": "Total"}
-	games = []
-	for event_id, market_outcomes in outcome_data.items():
-		meta = events.get(event_id)
-		if not meta:
-			continue
+	start_time = meta.get("start_time", "")
+	game = {
+		"event_id": event_id,
+		"sport": meta.get("sport", "Unknown"),
+		"league": meta.get("league", "Unknown"),
+		"home_team": home,
+		"away_team": away,
+		"matchup": f"{away} @ {home}",
+		"start_time": start_time,
+		"game_status": _compute_game_status(start_time),
+		"markets": market_list,
+	}
 
-		home = meta.get("home_team", "Unknown")
-		away = meta.get("away_team", "Unknown")
-
-		market_list = []
-		for market_type, outcome_list in market_outcomes.items():
-			market_list.append(
-				{
-					"market_type": market_type,
-					"market_display": display_names.get(market_type, market_type.title()),
-					"outcomes": outcome_list,
-				}
-			)
-
-		if not market_list:
-			continue
-		start_time = meta.get("start_time", "")
-
-		game_status = "upcoming"
-		try:
-			st = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-			utc_now = datetime.now(timezone.utc)
-			if st <= utc_now < st + timedelta(hours=4):
-				game_status = "live"
-			elif st + timedelta(hours=4) <= utc_now:
-				game_status = "completed"
-		except (ValueError, AttributeError):
-			pass
-
-		games.append(
-			{
-				"event_id": event_id,
-				"sport": meta.get("sport", "Unknown"),
-				"league": meta.get("league", "Unknown"),
-				"home_team": home,
-				"away_team": away,
-				"matchup": f"{away} @ {home}",
-				"start_time": start_time,
-				"game_status": game_status,
-				"markets": market_list,
-			}
-		)
-
-	games.sort(key=lambda g: g.get("start_time", ""))
-
-	tier = user.get("tier", "free")
-	games = apply_terminal_tier_filters(games, tier)
-
-	lines_end = time.time() - lines_start
-	logger.info(f"Scraped {len(games)} games in {lines_end:.2f} seconds")
+	logger.info(f"History for {event_id}: {len(market_list)} markets in {time.time() - start:.2f}s")
 
 	return {
-		"tier": tier,
+		"tier": user.get("tier", "free"),
 		"league": league,
-		"data": games,
-		"metadata": {"count": len(games)},
+		"data": game,
+		"metadata": {"markets": len(market_list)},
 		"cached_at": datetime.now(timezone.utc).isoformat() + "Z",
 	}
 
