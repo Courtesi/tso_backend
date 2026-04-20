@@ -22,7 +22,7 @@ betfinder = { workspace = true }
 [dependency-groups]
 dev = [
     "pre-commit>=4.5.0",
-    "ruff>=0.14.6",
+    "ruff>=0.15.11",
 ]
 
 [tool.ruff]
