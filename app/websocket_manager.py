@@ -146,7 +146,9 @@ class WebSocketManager:
             league = filters.get("league", "NBA")
             # Validate tier access to this league
             allowed_leagues = settings.TIER_ALLOWED_LEAGUES.get(conn.tier)
-            if allowed_leagues and league.upper() not in (allowed_league.upper() for allowed_league in allowed_leagues):
+            if allowed_leagues and league.upper() not in (
+                allowed_league.upper() for allowed_league in allowed_leagues
+            ):
                 raise ValueError(f"League {league} not available for {conn.tier} tier")
             channel = f"lines:{league}"
         elif stream == "ev":
@@ -303,7 +305,9 @@ class WebSocketManager:
         except Exception as e:
             error_msg = str(e).lower()
             if "close" in error_msg or "not connected" in error_msg:
-                logger.warning(f"Connection {connection_id[:5]} is dead, cleaning up: {e}")
+                logger.warning(
+                    f"Connection {connection_id[:5]} is dead, cleaning up: {e}"
+                )
                 await self.disconnect(connection_id)
             else:
                 logger.error(
@@ -533,7 +537,9 @@ class WebSocketManager:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
-                    logger.error(f"Error in Redis listener for {connection_id[:5]}: {e}")
+                    logger.error(
+                        f"Error in Redis listener for {connection_id[:5]}: {e}"
+                    )
                     await asyncio.sleep(1)
 
         except Exception as e:
