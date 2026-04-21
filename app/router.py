@@ -66,7 +66,9 @@ async def get_products():
                     "type": price.type,
                 },
                 "features": [
-                    {"name": f.name} for f in (getattr(product, "features", None) or [])
+                    {"name": v}
+                    for k, v in sorted(product.metadata.items())
+                    if k.startswith("feature_")
                 ],
             }
         )
