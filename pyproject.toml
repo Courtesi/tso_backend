@@ -5,12 +5,12 @@ description = "Trueshot FastAPI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi[standard]>=0.121.1",
+    "fastapi[standard]>=0.136.0",
     "firebase-admin>=7.1.0",
     "pydantic-settings>=2.14.0",
     "redis>=7.1.0",
-    "resend>=2.19.0",
-    "stripe>=14.0.0",
+    "resend>=2.29.0",
+    "stripe>=15.0.1",
 ]
 
 [tool.uv.workspace]
