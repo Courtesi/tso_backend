@@ -5,6 +5,7 @@ from app.router import _compute_game_status, _resolve_display_name
 
 # --- _compute_game_status ---
 
+
 def test_future_is_upcoming():
     future = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
     assert _compute_game_status(future) == "upcoming"
@@ -34,6 +35,7 @@ def test_empty_string_returns_upcoming():
 
 
 # --- _resolve_display_name ---
+
 
 def test_exact_home_team_match():
     assert _resolve_display_name("lakers", "Lakers", "Celtics") == "Lakers"

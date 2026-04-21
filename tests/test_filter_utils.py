@@ -6,7 +6,13 @@ from app.filter_utils import (
 )
 
 
-def _arb(profit=1.0, league="NBA", market="moneyline", bet1_sb="draftkings", bet2_sb="fanduel"):
+def _arb(
+    profit=1.0,
+    league="NBA",
+    market="moneyline",
+    bet1_sb="draftkings",
+    bet2_sb="fanduel",
+):
     return {
         "profit_percentage": profit,
         "league": league,
@@ -22,6 +28,7 @@ def _game(league="NBA", status="upcoming"):
 
 # --- Tier caps ---
 
+
 def test_free_tier_capped_at_5():
     arbs = [_arb() for _ in range(10)]
     assert len(apply_arb_filters(arbs, {}, "free")) == 5
@@ -33,6 +40,7 @@ def test_premium_tier_no_cap():
 
 
 # --- Profit filters ---
+
 
 def test_min_profit_filter():
     arbs = [_arb(0.5), _arb(1.0), _arb(2.0)]
@@ -56,6 +64,7 @@ def test_zero_min_profit_is_ignored():
 
 # --- League filters ---
 
+
 def test_league_filter_string():
     arbs = [_arb(league="NBA"), _arb(league="NFL"), _arb(league="NBA")]
     result = apply_arb_filters(arbs, {"league": "NBA"}, "premium")
@@ -77,6 +86,7 @@ def test_league_filter_all_passthrough():
 
 # --- Sportsbook filter ---
 
+
 def test_sportsbook_filter():
     arbs = [
         _arb(bet1_sb="draftkings"),
@@ -88,6 +98,7 @@ def test_sportsbook_filter():
 
 
 # --- Terminal tier filters ---
+
 
 def test_terminal_free_excludes_ncaab():
     games = [_game("NBA"), _game("NCAAB"), _game("NFL")]
@@ -103,6 +114,7 @@ def test_terminal_premium_allows_all():
 
 
 # --- Game time filter ---
+
 
 def test_filter_by_upcoming():
     games = [_game(status="upcoming"), _game(status="live"), _game(status="completed")]
@@ -128,6 +140,7 @@ def test_filter_none_returns_everything():
 
 
 # --- Sportsbook events tier filter ---
+
 
 def test_sportsbook_events_free_tier():
     events = [{"league": "NBA"}, {"league": "NCAAB"}, {"league": "NFL"}]
