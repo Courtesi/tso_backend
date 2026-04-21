@@ -49,8 +49,9 @@ async def get_products():
         if not active_prices:
             continue
         price = active_prices[0]
-        # product_dict = product.to_dict_recursive()
-        # metadata = product_dict.get("metadata") or {}
+        features = [
+            {"name": item["_data"]["name"]} for item in product.marketing_features
+        ]
         result.append(
             {
                 "id": product.id,
@@ -67,7 +68,7 @@ async def get_products():
                     else None,
                     "type": price.type,
                 },
-                "features": product.marketing_features,
+                "features": features,
             }
         )
     return {"products": result}
