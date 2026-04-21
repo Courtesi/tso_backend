@@ -65,7 +65,9 @@ async def get_products():
                     else None,
                     "type": price.type,
                 },
-                "features": [{"name": f.name} for f in (product.features or [])],
+                "features": [
+                    {"name": f.name} for f in (getattr(product, "features", None) or [])
+                ],
             }
         )
     return {"products": result}
