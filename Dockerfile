@@ -16,14 +16,14 @@ COPY pyproject.toml uv.lock ./
 
 # Install dependencies (cached separately from app code)
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-install-project --no-editable
+    uv sync --frozen --no-install-project --no-editable
 
 # Copy application code
 COPY /app ./app/
 
 # Install the project itself
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-editable
+    uv sync --frozen --no-editable
 
 # Runtime stage - Minimal production image
 FROM python:3.11-slim AS runtime
