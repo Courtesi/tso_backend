@@ -6,7 +6,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-from app.config import get_settings, SPORTSBOOKS, TIER_FEATURES
+from app.config import get_settings, SPORTSBOOKS
 from app.dependencies import get_firebase_user_from_token, get_user_with_tier
 from app.filter_utils import apply_terminal_tier_filters
 from app.redis import redis_client as shared_redis
@@ -35,6 +35,42 @@ async def health_check():
 # ==================== PUBLIC CONFIG ENDPOINTS ====================
 
 
+@router.get("/products")
+async def get_products():
+    """
+    Returns active Stripe products with their prices and marketing features.
+    Public endpoint - no authentication required.
+    """
+    result = []
+    products = stripe.Product.list(active=True)
+    for product in products.auto_paging_iter():
+        prices = stripe.Price.list(product=product.id, active=True)
+        active_prices = [p for p in prices.auto_paging_iter()]
+        if not active_prices:
+            continue
+        price = active_prices[0]
+        result.append(
+            {
+                "id": product.id,
+                "name": product.name,
+                "description": product.description,
+                "active": product.active,
+                "priceId": price.id,
+                "priceInfo": {
+                    "currency": price.currency,
+                    "unit_amount": price.unit_amount,
+                    "interval": price.recurring.interval if price.recurring else None,
+                    "interval_count": price.recurring.interval_count
+                    if price.recurring
+                    else None,
+                    "type": price.type,
+                },
+                "features": [{"name": f.name} for f in (product.features or [])],
+            }
+        )
+    return {"products": result}
+
+
 @router.get("/config/sportsbooks")
 async def get_sportsbooks():
     """
@@ -44,25 +80,11 @@ async def get_sportsbooks():
     return {"sportsbooks": SPORTSBOOKS}
 
 
-@router.get("/config/tiers")
-async def get_tiers():
-    """
-    Returns tier features configuration for the subscription page.
-    Also includes tier limits (allowed leagues, max arbs, etc).
-    Public endpoint - no authentication required.
-    """
-    # Combine display features with tier limits
-    tier_data = {}
-    for tier_name, features in TIER_FEATURES.items():
-        tier_data[tier_name] = {
-            **features,
-            "allowed_leagues": settings.TIER_ALLOWED_LEAGUES.get(tier_name),
-            "max_arbs": settings.TIER_MAX_ARBS.get(tier_name),
-        }
-
+@router.get("/config/leagues")
+async def get_leagues():
     return {
-        "tiers": tier_data,
         "all_leagues": settings.ALL_LEAGUES,
+        "tier_allowed_leagues": settings.TIER_ALLOWED_LEAGUES,
     }
 
 

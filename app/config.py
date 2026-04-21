@@ -92,26 +92,3 @@ SPORTSBOOKS = {
     "kalshi": {"icon": "kalshi.png", "display_name": "Kalshi"},
     "polymarket": {"icon": "polymarket.png", "display_name": "Polymarket"},
 }
-
-# Tier features configuration for subscription page
-TIER_FEATURES = {
-    "free": {
-        "name": "Free",
-        "description": "Use Trueshot's basic features",
-        "price": "$0",
-        "features": [
-            "Odds charts (Available leagues)",
-            "Access to 5 arbitrage bets at a time",
-            "Finds bets every 60 seconds",
-        ],
-    },
-    "premium": {
-        "name": "Premium",
-        "description": "Full access to all features",
-        "features_intro": "Everything in Free, and:",
-        "features": [
-            "Access to unlimited arbitrage bets",
-            "Real time updates on bets and lines",
-        ],
-    },
-}

@@ -38,11 +38,9 @@ def test_resend_api():
 
 
 def test_app_config_importable():
-    from app.config import SPORTSBOOKS, TIER_FEATURES
+    from app.config import SPORTSBOOKS
 
     assert isinstance(SPORTSBOOKS, dict)
-    assert "free" in TIER_FEATURES
-    assert "premium" in TIER_FEATURES
 
 
 def test_app_filter_utils_importable():
