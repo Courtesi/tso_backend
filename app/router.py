@@ -49,9 +49,13 @@ async def get_products():
         if not active_prices:
             continue
         price = active_prices[0]
+
         features = [
-            {"name": item["_data"]["name"]} for item in product.marketing_features
+            item.name
+            for item in (product.marketing_features or [])
+            if hasattr(item, "name")
         ]
+
         result.append(
             {
                 "id": product.id,
