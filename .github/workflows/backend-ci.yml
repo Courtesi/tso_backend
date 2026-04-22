@@ -45,7 +45,7 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_DIRECTORY: ${{ secrets.DEPLOY_DIRECTORY }}
         run: |
-          ssh -i ~/.ssh/id_ed25519 $DEPLOY_USERNAME@$DEPLOY_HOST "
+          ssh -i ~/.ssh/github-runner $DEPLOY_USERNAME@$DEPLOY_HOST "
             cd $DEPLOY_DIRECTORY &&
             git pull origin main &&
             docker compose build backend &&
