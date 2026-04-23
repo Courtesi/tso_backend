@@ -37,7 +37,33 @@ async def lifespan(app: FastAPI):
     await redis_client.disconnect()
 
 
-app = FastAPI(lifespan=lifespan)
+docs_enabled = settings.ENV == "development" or settings.DOCS_ENABLED
+app = FastAPI(
+    lifespan=lifespan,
+    title="TrueShotOdds API",
+    description="Backend API for TrueShotOdds — real-time sports betting arbitrage and +EV bet detection across 40+ sportsbooks.",
+    version="1.0.0",
+    docs_url="/docs" if docs_enabled else None,
+    redoc_url="/redoc" if docs_enabled else None,
+    openapi_url="/openapi.json" if docs_enabled else None,
+    openapi_tags=[
+        {"name": "Health", "description": "Service liveness check."},
+        {
+            "name": "Config",
+            "description": "Public configuration: Stripe products, supported sportsbooks, and available leagues.",
+        },
+        {
+            "name": "Lines",
+            "description": "Authenticated endpoints for live odds snapshots and full line-movement history.",
+        },
+        {"name": "Users", "description": "Account management for authenticated users."},
+        {
+            "name": "Stripe",
+            "description": "Stripe billing portal and subscription management.",
+        },
+        {"name": "Reports", "description": "Bug report submission."},
+    ],
+)
 origins = [settings.FRONTEND_URL]
 
 app.add_middleware(

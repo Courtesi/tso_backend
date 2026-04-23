@@ -1,6 +1,6 @@
 # Backend
 
-FastAPI backend service for TrueShot Odds arbitrage betting platform.
+FastAPI backend service for TrueShotOdds arbitrage betting platform.
 
 ## Quick Start
 

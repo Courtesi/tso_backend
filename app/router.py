@@ -27,7 +27,12 @@ stripe.api_key = settings.STRIPE_SECRET_KEY
 resend.api_key = settings.RESEND_API_KEY
 
 
-@router.get("/health")
+@router.get(
+    "/health",
+    tags=["Health"],
+    summary="Health check",
+    description="Returns `{status: healthy}` when the service is running. Used by Docker and load balancers.",
+)
 async def health_check():
     return {"status": "healthy"}
 
@@ -35,12 +40,13 @@ async def health_check():
 # ==================== PUBLIC CONFIG ENDPOINTS ====================
 
 
-@router.get("/products")
+@router.get(
+    "/products",
+    tags=["Config"],
+    summary="List Stripe products",
+    description="Returns all active Stripe products with their prices and marketing feature lists. Used to populate the pricing page. No authentication required.",
+)
 async def get_products():
-    """
-    Returns active Stripe products with their prices and marketing features.
-    Public endpoint - no authentication required.
-    """
     result = []
     products = stripe.Product.list(active=True)
     for product in products.auto_paging_iter():
@@ -78,16 +84,22 @@ async def get_products():
     return {"products": result}
 
 
-@router.get("/config/sportsbooks")
+@router.get(
+    "/config/sportsbooks",
+    tags=["Config"],
+    summary="List supported sportsbooks",
+    description="Returns the icon filename and display name for every supported sportsbook. No authentication required.",
+)
 async def get_sportsbooks():
-    """
-    Returns sportsbook configuration data (icons and display names).
-    Public endpoint - no authentication required.
-    """
     return {"sportsbooks": SPORTSBOOKS}
 
 
-@router.get("/config/leagues")
+@router.get(
+    "/config/leagues",
+    tags=["Config"],
+    summary="List available leagues",
+    description="Returns all supported leagues and which leagues are available per tier (free vs premium). No authentication required.",
+)
 async def get_leagues():
     return {
         "all_leagues": settings.ALL_LEAGUES,
@@ -126,16 +138,24 @@ def _resolve_display_name(outcome_name: str, home: str, away: str) -> str:
 MARKET_DISPLAY_NAMES = {"MONEY": "Moneyline", "SPREAD": "Spread", "TOTAL": "Total"}
 
 
-@router.get("/terminal/odds")
+@router.get(
+    "/terminal/odds",
+    tags=["Lines"],
+    summary="Get latest odds snapshot for a league",
+    description=(
+        "Returns the most recent odds for every game in a league, without history arrays. "
+        "Reads from `odds:latest:{league}` in Redis for a fast initial load that populates the odds table. "
+        "Requires authentication. Free tier receives a filtered subset of games."
+    ),
+    responses={
+        401: {"description": "Missing or invalid Firebase token"},
+        503: {"description": "Redis unavailable"},
+    },
+)
 async def get_terminal_odds(
     user: Annotated[dict, Depends(get_user_with_tier)],
     league: str = "NBA",
 ):
-    """
-    Returns the latest odds for every game in a league, with no history arrays.
-    Reads a single Redis hash (odds:latest:{league}) for a lightweight initial load
-    that populates the odds table before any chart is opened.
-    """
     start = time.time()
     r = shared_redis.redis
     if not r:
@@ -282,16 +302,26 @@ async def get_terminal_odds(
     }
 
 
-@router.get("/terminal/lines/{event_id}")
+@router.get(
+    "/terminal/lines/{event_id}",
+    tags=["Lines"],
+    summary="Get full line history for a game",
+    description=(
+        "Returns the complete odds history (up to 4 hours) for every market and outcome in a single game. "
+        "Called when the user expands the chart view for a specific event. "
+        "Reads sorted-set keys from Redis scoped to the event. Requires authentication."
+    ),
+    responses={
+        401: {"description": "Missing or invalid Firebase token"},
+        404: {"description": "No line data or event metadata found for this event"},
+        503: {"description": "Redis unavailable"},
+    },
+)
 async def get_terminal_lines_for_event(
     event_id: str,
     user: Annotated[dict, Depends(get_user_with_tier)],
     league: str = "NBA",
 ):
-    """
-    Returns full line history for a single game (called when the user expands
-    the chart dropdown). Reads the sorted-set keys for this event only.
-    """
     start = time.time()
     r = shared_redis.redis
     if not r:
@@ -403,12 +433,21 @@ async def get_terminal_lines_for_event(
 # ==================== USER MANAGEMENT ====================
 
 
-@router.post("/delete-account")
+@router.post(
+    "/delete-account",
+    tags=["Users"],
+    summary="Delete account",
+    description=(
+        "Permanently deletes the authenticated user's Firebase account and cancels any active or trialing Stripe subscriptions. "
+        "Requires a valid Firebase ID token in the Authorization header."
+    ),
+    responses={
+        401: {"description": "Missing or invalid Firebase token"},
+        404: {"description": "Firebase user not found"},
+        400: {"description": "Stripe error while canceling subscription"},
+    },
+)
 async def delete_account(user: Annotated[dict, Depends(get_firebase_user_from_token)]):
-    """
-    Deletes a user account and cancels any active Stripe subscriptions.
-    The user must be authenticated (token verified by get_firebase_user_from_token).
-    """
     uid = user.get("uid")
 
     try:
@@ -448,15 +487,24 @@ async def delete_account(user: Annotated[dict, Depends(get_firebase_user_from_to
 # ==================== STRIPE CUSTOMER PORTAL ====================
 
 
-@router.post("/create-portal-session")
+@router.post(
+    "/create-portal-session",
+    tags=["Stripe"],
+    summary="Create Stripe customer portal session",
+    description=(
+        "Looks up the authenticated user's Stripe customer record by Firebase UID and creates a billing portal session. "
+        "Returns a `url` the client should redirect to. Requires a valid Firebase ID token."
+    ),
+    responses={
+        401: {"description": "Missing or invalid Firebase token"},
+        404: {"description": "No Stripe customer found for this user"},
+        400: {"description": "Stripe error"},
+    },
+)
 async def create_portal_session(
     user: Annotated[dict, Depends(get_firebase_user_from_token)],
     return_url: Optional[str] = Body(None, alias="returnUrl", embed=True),
 ):
-    """
-    Creates a Stripe Customer Portal session for the authenticated user
-    Returns the portal URL for redirect
-    """
     try:
         # Get user's UID from Firebase token
         uid = user.get("uid")
@@ -493,7 +541,18 @@ async def create_portal_session(
 # ==================== BUG REPORTING ====================
 
 
-@router.post("/create-bug-report")
+@router.post(
+    "/create-bug-report",
+    tags=["Reports"],
+    summary="Submit a bug report",
+    description=(
+        "Accepts a multipart form submission with bug details and an optional screenshot. "
+        "Sends an HTML email to the support address via Resend. No authentication required."
+    ),
+    responses={
+        500: {"description": "Failed to send email via Resend"},
+    },
+)
 async def submit_bug_report(
     title: Annotated[str, Form()],
     description: Annotated[str, Form()],
@@ -502,10 +561,6 @@ async def submit_bug_report(
     userAgent: Annotated[str, Form()],
     screenshot: Annotated[Optional[UploadFile], File()] = None,
 ):
-    """
-    Public endpoint for submitting bug reports
-    Sends email notification to support team
-    """
     try:
         # Prepare email content
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -547,7 +602,7 @@ async def submit_bug_report(
 
         # Prepare email params
         email_params = {
-            "from": f"Trueshot <{str(settings.RESEND_EMAIL)}>",
+            "from": f"TrueShotOdds <{str(settings.RESEND_EMAIL)}>",
             "to": [str(settings.RESEND_EMAIL)],
             "subject": f"[Bug Report] {category}: {title}",
             "html": html_content,

@@ -3,9 +3,10 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "Trueshot FastAPI"
+    APP_NAME: str = "TrueShotOdds FastAPI"
     ENV: str
     FRONTEND_URL: str
+    DOCS_ENABLED: bool = False
 
     GOOGLE_APPLICATION_CREDENTIALS: str
     STRIPE_SECRET_KEY: str
