@@ -37,6 +37,7 @@ The backend requires the following environment variables (see `.env.example`):
 <!-- ENV_EXAMPLE_START -->
 ```env
 ENV=development
+DOCS_ENABLED=true
 
 # For Stripe redirects
 FRONTEND_URL=... # eg: http://localhost:5173
