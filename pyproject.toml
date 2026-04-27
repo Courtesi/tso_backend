@@ -23,7 +23,7 @@ betfinder = { workspace = true }
 dev = [
     "pre-commit>=4.5.0",
     "pytest>=8.0.0",
-    "ruff>=0.15.11",
+    "ruff>=0.15.12",
 ]
 
 [tool.ruff]
