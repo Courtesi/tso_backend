@@ -5,7 +5,7 @@ description = "TrueShotOdds FastAPI"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi[standard]>=0.136.0",
+    "fastapi[standard]>=0.136.1",
     "firebase-admin>=7.1.0",
     "pydantic-settings>=2.14.0",
     "redis>=7.1.0",
