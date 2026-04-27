@@ -10,7 +10,7 @@ dependencies = [
     "pydantic-settings>=2.14.0",
     "redis>=7.1.0",
     "resend>=2.29.0",
-    "stripe>=15.0.1",
+    "stripe>=15.1.0",
 ]
 
 [tool.uv.workspace]
