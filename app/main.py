@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.redis import redis_client
+from app.timescale import init_pool, close_pool
 
 import firebase_admin
 from firebase_admin import credentials
@@ -31,10 +32,21 @@ uvicorn_logger.addFilter(HealthCheckFilter())
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await redis_client.connect()
+    try:
+        await init_pool(
+            host=settings.TIMESCALE_HOST,
+            port=settings.TIMESCALE_PORT,
+            database=settings.TIMESCALE_DB,
+            user=settings.TIMESCALE_USER,
+            password=settings.TIMESCALE_PASSWORD,
+        )
+    except Exception as e:
+        logging.warning(f"TimescaleDB unavailable at startup: {e}")
 
     yield
 
     await redis_client.disconnect()
+    await close_pool()
 
 
 docs_enabled = settings.ENV == "development" or settings.DOCS_ENABLED

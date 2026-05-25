@@ -40,6 +40,13 @@ class Settings(BaseSettings):
         "premium": None,  # None means all leagues allowed
     }
 
+    # TimescaleDB settings
+    TIMESCALE_HOST: str = "timescaledb"
+    TIMESCALE_PORT: int = 5432
+    TIMESCALE_DB: str = "trueshot"
+    TIMESCALE_USER: str = "trueshot"
+    TIMESCALE_PASSWORD: str = ""
+
     # WebSocket settings
     WEBSOCKET_PING_INTERVAL: int = 30  # seconds
     WEBSOCKET_PONG_TIMEOUT: int = 10  # seconds

@@ -10,6 +10,7 @@ from app.config import get_settings, SPORTSBOOKS
 from app.dependencies import get_firebase_user_from_token, get_user_with_tier
 from app.filter_utils import apply_terminal_tier_filters
 from app.redis import redis_client as shared_redis
+from app.timescale import get_pool
 
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import HTTPException
@@ -307,14 +308,13 @@ async def get_terminal_odds(
     tags=["Lines"],
     summary="Get full line history for a game",
     description=(
-        "Returns the complete odds history (up to 4 hours) for every market and outcome in a single game. "
-        "Called when the user expands the chart view for a specific event. "
-        "Reads sorted-set keys from Redis scoped to the event. Requires authentication."
+        "Returns the complete odds history for every market and outcome in a single game. "
+        "Called when the user expands the chart view for a specific event. Requires authentication."
     ),
     responses={
         401: {"description": "Missing or invalid Firebase token"},
         404: {"description": "No line data or event metadata found for this event"},
-        503: {"description": "Redis unavailable"},
+        503: {"description": "TimescaleDB or Redis unavailable"},
     },
 )
 async def get_terminal_lines_for_event(
@@ -323,29 +323,28 @@ async def get_terminal_lines_for_event(
     league: str = "NBA",
 ):
     start = time.time()
+    pool = get_pool()
+    if not pool:
+        raise HTTPException(status_code=503, detail="TimescaleDB not available")
     r = shared_redis.redis
     if not r:
         raise HTTPException(status_code=503, detail="Redis not available")
 
-    now = int(time.time())
-    window_start = now - settings.LINES_TTL
+    window_start = datetime.now(timezone.utc) - timedelta(seconds=settings.LINES_TTL)
 
-    # 1. Scan only the keys for this event
-    line_keys = [k async for k in r.scan_iter(match=f"lines:{league}:*:{event_id}:*")]
-    if not line_keys:
+    rows = await pool.fetch(
+        """
+        SELECT time, market_type, outcome_name, sportsbook, odds
+        FROM line_movements
+        WHERE event_id = $1 AND time > $2
+        ORDER BY market_type, outcome_name, time ASC
+        """,
+        event_id,
+        window_start,
+    )
+    if not rows:
         raise HTTPException(status_code=404, detail="No line data found for this event")
 
-    # 2. Group keys by market_type -> outcome_name
-    grouped: dict = {}
-    for key in line_keys:
-        key_str = key.decode() if isinstance(key, bytes) else key
-        parts = key_str.split(":")
-        if len(parts) != 5:
-            continue
-        _, _league, market_type, _event_id, outcome_name = parts
-        grouped.setdefault(market_type, {})[outcome_name] = key
-
-    # 3. Load event metadata
     meta_raw = await r.get(f"event:{league}:{event_id}")
     if not meta_raw:
         raise HTTPException(status_code=404, detail="Event metadata not found")
@@ -353,56 +352,48 @@ async def get_terminal_lines_for_event(
     home = meta.get("home_team", "Unknown")
     away = meta.get("away_team", "Unknown")
 
-    # 4. Pipeline zrangebyscore for all outcome keys
-    outcome_entries = []
-    for market_type, outcomes in grouped.items():
-        for outcome_name, redis_key in outcomes.items():
-            outcome_entries.append((market_type, outcome_name, redis_key))
-
-    pipe = r.pipeline(transaction=False)
-    for _, _, redis_key in outcome_entries:
-        pipe.zrangebyscore(redis_key, window_start, now)
-    all_results = await pipe.execute()
-
-    # 5. Build market/outcome structure with full history
     market_outcomes: dict = {}
-    for (market_type, outcome_name, redis_key), raw_members in zip(
-        outcome_entries, all_results
-    ):
-        if not raw_members:
-            continue
-
-        history = []
-        history_by_sportsbook: dict = {}
-        for member in raw_members:
-            point = json.loads(member)
-            history.append(point)
-            sb = point.get("sportsbook")
-            if sb:
-                history_by_sportsbook.setdefault(sb, []).append(point)
-
-        latest = max(history, key=lambda x: x["timestamp"])
-
-        outcome_obj = {
-            "outcome_id": redis_key
-            if isinstance(redis_key, str)
-            else redis_key.decode(),
-            "outcome_name": _resolve_display_name(outcome_name, home, away),
-            "history": history,
-            "history_by_sportsbook": history_by_sportsbook,
-            "current_best_odds": latest["odds"],
-            "current_best_sportsbook": latest["sportsbook"],
+    for row in rows:
+        market_type = row["market_type"]
+        outcome_name = row["outcome_name"]
+        sportsbook = row["sportsbook"]
+        point = {
+            "odds": row["odds"],
+            "sportsbook": sportsbook,
+            "timestamp": int(row["time"].timestamp()),
         }
-        market_outcomes.setdefault(market_type, []).append(outcome_obj)
 
-    market_list = [
-        {
-            "market_type": mt,
-            "market_display": MARKET_DISPLAY_NAMES.get(mt, mt.title()),
-            "outcomes": outcomes,
-        }
-        for mt, outcomes in market_outcomes.items()
-    ]
+        bucket = market_outcomes.setdefault(market_type, {}).setdefault(
+            outcome_name, {"history": [], "history_by_sportsbook": {}}
+        )
+        bucket["history"].append(point)
+        bucket["history_by_sportsbook"].setdefault(sportsbook, []).append(point)
+
+    market_list = []
+    for market_type, outcomes in market_outcomes.items():
+        outcome_list = []
+        for outcome_name, data in outcomes.items():
+            history = data["history"]
+            latest = max(history, key=lambda x: x["timestamp"])
+            outcome_list.append(
+                {
+                    "outcome_id": f"lines:{league}:{market_type}:{event_id}:{outcome_name}",
+                    "outcome_name": _resolve_display_name(outcome_name, home, away),
+                    "history": history,
+                    "history_by_sportsbook": data["history_by_sportsbook"],
+                    "current_best_odds": latest["odds"],
+                    "current_best_sportsbook": latest["sportsbook"],
+                }
+            )
+        market_list.append(
+            {
+                "market_type": market_type,
+                "market_display": MARKET_DISPLAY_NAMES.get(
+                    market_type, market_type.title()
+                ),
+                "outcomes": outcome_list,
+            }
+        )
 
     start_time = meta.get("start_time", "")
     game = {
@@ -418,7 +409,7 @@ async def get_terminal_lines_for_event(
     }
 
     logger.info(
-        f"History for {event_id}: {len(market_list)} markets in {time.time() - start:.2f}s"
+        f"History for {event_id}: {len(market_list)} markets, {len(rows)} points in {time.time() - start:.2f}s"
     )
 
     return {
